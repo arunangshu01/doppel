@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="doppel turns JSON schemas into local mock REST APIs with realistic seeded data and resource relationships. Build and test with an interactive React playground." />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <style>html { background: #f5f6f7; color-scheme: light; } html[data-theme="dark"] { background: #101214; color-scheme: dark; }</style>
+    <script>
+      try {
+        const saved = localStorage.getItem('doppel-theme');
+        document.documentElement.dataset.theme = ['dark', 'light'].includes(saved) ? saved : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      } catch {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    </script>
+    <title>doppel - Mock API playground</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+node_modules/
+coverage/
+.DS_Store
+.env.*
+!.env.example
+gha-creds-*.json
+.firebase/
