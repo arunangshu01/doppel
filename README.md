@@ -248,12 +248,27 @@ The image uses `python:3.12-slim`, a non-root user, PORT-aware startup, and exac
 
 ## GCP deployment architecture
 
-**Setup in progress; not deployed.** The user confirmed project `doppel-101126`, linked billing, the monthly budget alert, and Firebase setup. The chosen Hosting site is `doppel-app`, now configured in `firebase.json`; verify successful site creation in Firebase Console before continuing. Terminal authentication and project/repository identifiers are confirmed. With explicit approval, the required APIs were enabled and the Docker Artifact Registry repository `projects/doppel-101126/locations/asia-south1/repositories/doppel` was created and verified. With separate approval, `doppel-run` and `doppel-deployer` were created and the Step 5 project/repository/runtime-account IAM grants were applied and verified. The runtime has no project-level role grants. With approval, the empty `doppel-admin-token` secret container was created and its runtime-only Secret Accessor binding was verified. The user added the secret value privately in the console, and version 1 was verified as enabled using metadata only. The assistant has not accessed the token value. Step 7 is complete: the `github` WIF pool, active `doppel-repo` provider, and repository-scoped deployer impersonation binding were created with approval and verified. The provider checks repository ID `1452590745`, owner ID `22813216`, main, the exact deploy workflow, and the production environment subject. Its resource name is `projects/831646949881/locations/global/workloadIdentityPools/github/providers/doppel-repo`. Step 8 is complete: repository Actions Variables `GCP_PROJECT_ID`, `GCP_DEPLOY_SA`, and `GCP_WIF_PROVIDER` were set with approval and their values verified. They are Variables, not Secrets. Step 9 is complete: the `production` environment allows only branch `main`, with no tag deployment policy. After inspection found no existing branch protections, the active `Protect main` ruleset (ID `26948210`) was created with separate approval and verified; GitHub now reports `main` as protected. It requires pull requests, resolved review conversations, up-to-date branches, and the GitHub Actions checks `Backend tests` and `Frontend tests and build`; it blocks branch deletion and force pushes, has no bypass actors, and requires zero review approvals for solo-maintainer use. Step 10 PR preparation is approved on feature branch `feat/doppel-playground-gcp`; merge and deployment still require separate approval. Enabling APIs may provision Google-managed service identities automatically. Do not deploy before completing setup below.
+**Live deployment:** [doppel playground](https://doppel-app.web.app), first deployed through [GitHub Actions](https://github.com/arunangshu01/doppel/actions/runs/42836375202) after main CI passed. Live smoke checks verified Hosting, same-origin API health, retail data, no-store responses, and prefixed OpenAPI/docs. Browser interaction checks remain manual.
+
+| Setting | Configured value |
+| --- | --- |
+| Dedicated GCP project | `doppel-101126` (project number `831646949881`) |
+| Firebase Hosting site | `doppel-app` |
+| Cloud Run service / region | `doppel-api` / `asia-south1` |
+| Runtime / deployer identities | `doppel-run` / `doppel-deployer` in the doppel project |
+| Artifact Registry | `doppel` Docker repository in `asia-south1` |
+| WIF provider | `projects/831646949881/locations/global/workloadIdentityPools/github/providers/doppel-repo` |
+| Immutable OIDC subject | `repo:arunangshu01@22813216/doppel@1452590745:environment:production` |
+| Scaling | Minimum 0; maximum 1 at both service and revision levels |
+
+Billing and a project-scoped monthly INR 500 alert budget are configured. The admin token was entered privately in Secret Manager; its value is not in the repository. GitHub Actions uses three repository Variables, not Secrets, for the cloud identifiers. The `production` environment allows only branch `main`, with no tag policy. The active `Protect main` ruleset requires PRs, resolved review conversations, up-to-date branches, and both CI checks, blocks deletion/force pushes, and has no bypass actors. Zero review approvals are required for solo-maintainer use.
+
+Provisioning and the first deployment were explicitly approved. The service-level cap was subsequently corrected from the platform default of 3 to 1 without creating a new revision. The workflow retains both `--max 1` (whole service) and `--max-instances 1` (each revision). Future merges that pass main CI automatically deploy; approve each merge with that consequence in mind. The numbered guide below is a provisioning reference, not a list of resources to recreate.
 
 This follows the portfolio pattern with a separate project:
 
 - Firebase Hosting serves `frontend/dist`. Its `/doppel/api/**` rewrite precedes the SPA fallback and points to `doppel-api` in `asia-south1`.
-- Cloud Run uses port 8080, 1 CPU, 512 MiB memory, concurrency 20, min-instances 0, max-instances 1, one Python worker, and a 60-second request timeout.
+- Cloud Run uses port 8080, 1 CPU, 512 MiB memory, concurrency 20, min-instances 0, both service-level and revision-level maximums of 1, one Python worker, and a 60-second request timeout.
 - Artifact Registry repository `doppel` stores SHA-tagged images.
 - Secret Manager supplies `ADMIN_TOKEN` from `doppel-admin-token:latest`; only the runtime service account receives access to this secret.
 - GitHub Actions uses OIDC Workload Identity Federation and service-account impersonation. No service-account JSON key is needed or allowed.
@@ -374,7 +389,19 @@ The workflow injects `ADMIN_TOKEN=doppel-admin-token:latest`. An enabled version
 
 ### 7. Configure keyless WIF restricted to this workflow and main
 
-Confirm the identity/trust changes and verify `$REPO_ID`, `$OWNER_ID`, and `$GITHUB_REPO`. Then:
+Confirm the identity/trust changes and verify `$REPO_ID`, `$OWNER_ID`, and `$GITHUB_REPO`. First inspect the repository's non-secret OIDC subject settings:
+
+```bash
+gh api "repos/$GITHUB_REPO/actions/oidc/customization/sub" \
+  --jq '{use_default, use_immutable_subject, sub_claim_prefix}'
+export OIDC_SUB_PREFIX=$(gh api "repos/$GITHUB_REPO/actions/oidc/customization/sub" \
+  --jq '.sub_claim_prefix // empty')
+test -n "$OIDC_SUB_PREFIX"
+```
+
+For this repository, immutable subjects are enabled and the prefix is `repo:arunangshu01@22813216/doppel@1452590745`. The production subject appends `:environment:production`. Do not use the legacy `repo:OWNER/REPO` prefix here: it caused the first authentication attempt to fail. Keep immutable subjects enabled. If the prefix is empty or a custom subject template is configured, stop and inspect the template before proceeding; do not guess, disable protections, or remove the exact subject check.
+
+Then create the trust configuration:
 
 ```bash
 gcloud iam workload-identity-pools create github --project="$PROJECT_ID" \
@@ -385,7 +412,7 @@ gcloud iam workload-identity-pools providers create-oidc doppel-repo \
   --display-name='Doppel production workflow' \
   --issuer-uri=https://token.actions.githubusercontent.com \
   --attribute-mapping='google.subject=assertion.sub,attribute.repository_id=assertion.repository_id' \
-  --attribute-condition="assertion.repository_id=='${REPO_ID}' && assertion.repository_owner_id=='${OWNER_ID}' && assertion.ref=='refs/heads/main' && assertion.workflow_ref=='${GITHUB_REPO}/.github/workflows/deploy.yml@refs/heads/main' && assertion.sub=='repo:${GITHUB_REPO}:environment:production'"
+  --attribute-condition="assertion.repository_id=='${REPO_ID}' && assertion.repository_owner_id=='${OWNER_ID}' && assertion.ref=='refs/heads/main' && assertion.workflow_ref=='${GITHUB_REPO}/.github/workflows/deploy.yml@refs/heads/main' && assertion.sub=='${OIDC_SUB_PREFIX:?Check the OIDC subject prefix first}:environment:production'"
 
 gcloud iam service-accounts add-iam-policy-binding "$DEPLOY_SA" \
   --project="$PROJECT_ID" --role=roles/iam.workloadIdentityUser \
@@ -490,7 +517,7 @@ firebase.json          Hosting, caching, and Cloud Run rewrite
 
 ## Scope
 
-Resource endpoints are read-only. The anonymous playground model is ephemeral, capacity-bounded, and unlisted, not account-based tenant isolation or durable hosting. Persistent APIs, user accounts, database storage, write endpoints, distributed rate limits, and stronger abuse controls are not implemented. The GCP configuration is ready for guided provisioning; a checked-in workflow does not mean a live service exists.
+Resource endpoints are read-only. The anonymous playground model is ephemeral, capacity-bounded, and unlisted, not account-based tenant isolation or durable hosting. Persistent APIs, user accounts, database storage, write endpoints, distributed rate limits, and stronger abuse controls are not implemented. The deployment status and live endpoint are recorded above; passing local tests alone does not establish cloud deployment or browser behavior.
 
 ## License
 

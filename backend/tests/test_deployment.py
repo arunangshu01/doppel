@@ -33,6 +33,8 @@ def test_ci_gate_and_keyless_deployment():
     scripts = "\n".join(step.get("run", "") for step in steps)
     for expected in ["--port 8080", "--min-instances 0", "--max-instances 1", "--region", "doppel-admin-token:latest", "VITE_API_URL"]:
         assert expected in scripts or expected in str(steps)
+    deploy_script = next(step["run"] for step in steps if step.get("name") == "Deploy API")
+    assert re.search(r"--max(?:=|\s+)1(?:\s|$)", deploy_script)
     assert scripts.count('test "$COMMIT" = "$HEAD_SHA"') == 2
     assert "ap-portfolio-241026|mahakal-ai-230925" in scripts
     for step in steps:
@@ -53,6 +55,14 @@ def test_hosting_rewrite_and_nonsecret_environment():
     assert "USER appuser" in docker
     assert "PORT=8080" in docker and "--workers 1" in docker
     assert "COPY . ." not in docker
+
+
+def test_readme_uses_repository_oidc_subject_prefix():
+    readme = (ROOT / "README.md").read_text()
+    assert 'gh api "repos/$GITHUB_REPO/actions/oidc/customization/sub"' in readme
+    assert ".sub_claim_prefix // empty" in readme
+    assert "assertion.sub=='${OIDC_SUB_PREFIX:?Check the OIDC subject prefix first}:environment:production'" in readme
+    assert "assertion.sub=='repo:${GITHUB_REPO}:environment:production'" not in readme
 
 
 def test_readme_schema_and_command_syntax():
