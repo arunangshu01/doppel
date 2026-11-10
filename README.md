@@ -261,9 +261,9 @@ The image uses `python:3.12-slim`, a non-root user, PORT-aware startup, and exac
 | Immutable OIDC subject | `repo:arunangshu01@22813216/doppel@1452590745:environment:production` |
 | Scaling | Minimum 0; maximum 1 at both service and revision levels |
 
-Billing and a project-scoped monthly INR 500 alert budget are configured. The admin token was entered privately in Secret Manager; its value is not in the repository. GitHub Actions uses three repository Variables, not Secrets, for the cloud identifiers. The `production` environment allows only branch `main`, with no tag policy. The active `Protect main` ruleset requires PRs, resolved review conversations, up-to-date branches, and both CI checks, blocks deletion/force pushes, and has no bypass actors. Zero review approvals are required for solo-maintainer use.
+Billing and a project-scoped monthly INR 500 alert budget are configured. The admin token was entered privately in Secret Manager; its value is not in the repository. GitHub Actions uses three repository Variables, not Secrets, for the cloud identifiers. The `production` environment allows only branch `main`, with no tag policy, and requires deployment approval from `arunangshu01`. Admin bypass is disabled. Self-review of deployments is allowed so the solo maintainer can approve runs they triggered. The active `Protect main` ruleset requires PRs, resolved review conversations, up-to-date branches, and both CI checks, blocks deletion/force pushes, and has no bypass actors. Zero review approvals are required for solo-maintainer use.
 
-Provisioning and the first deployment were explicitly approved. The service-level cap was subsequently corrected from the platform default of 3 to 1 without creating a new revision. The workflow retains both `--max 1` (whole service) and `--max-instances 1` (each revision). Future merges that pass main CI automatically deploy; approve each merge with that consequence in mind. The numbered guide below is a provisioning reference, not a list of resources to recreate.
+Provisioning and the first deployment were explicitly approved. The service-level cap was subsequently corrected from the platform default of 3 to 1 without creating a new revision. The workflow retains both `--max 1` (whole service) and `--max-instances 1` (each revision). Future merges that pass main CI queue Deploy, but its production job waits for a separate GitHub environment approval before any job steps, cloud authentication, or deployment occur. Merging a PR does not grant that approval. The numbered guide below is a provisioning reference, not a list of resources to recreate.
 
 This follows the portfolio pattern with a separate project:
 
@@ -273,7 +273,7 @@ This follows the portfolio pattern with a separate project:
 - Secret Manager supplies `ADMIN_TOKEN` from `doppel-admin-token:latest`; only the runtime service account receives access to this secret.
 - GitHub Actions uses OIDC Workload Identity Federation and service-account impersonation. No service-account JSON key is needed or allowed.
 - Deploy runs only after successful **push CI on main**, for this repository. It checks out the exact tested SHA and rejects stale main commits before build and again before deployment.
-- The job uses GitHub's `production` environment and repeats tests/build before cloud authentication. Configure the environment's main-only restriction manually.
+- The job uses GitHub's `production` environment and waits for its required reviewer before starting. Once approved, it repeats tests/build before cloud authentication. Required reviewers, main-only restrictions, and disabled admin bypass are GitHub repository settings, not controls enforced by YAML alone.
 - Deployment is sequential: API, API health, Hosting, then Hosting/API-rewrite/OpenAPI/docs smoke tests. An API success followed by Hosting failure leaves the previous frontend using the new API.
 - There is deliberately no manual Deploy dispatch that bypasses the CI-success gate. To retry setup failures, rerun the CI run whose original event was the latest main push; a successful completion triggers Deploy again. A manually dispatched CI run does not qualify.
 
@@ -447,7 +447,9 @@ These identifiers are not secrets. The admin token belongs only in Secret Manage
 
 ### 9. Restrict production to main and confirm existing rulesets
 
-In Settings > Environments, create/select **production**, choose selected deployment branches/tags, and add a **branch rule for main only**, with no tag rule. Add a required reviewer if supported and desired; avoid blocking a solo maintainer with an impossible self-approval requirement.
+In Settings > Environments, create/select **production**, choose selected deployment branches/tags, and add a **branch rule for main only**, with no tag rule. Enable **Required reviewers** and select **arunangshu01**. Leave **Prevent self-review** unchecked so the solo maintainer can approve deployments they triggered. Disable **Allow administrators to bypass configured protection rules**. Save and verify all settings. If the repository's plan or visibility does not support required reviewers, stop before deployment rather than treating an unprotected environment as approval-gated.
+
+The intended flow is **PR -> required CI -> explicit merge -> main CI -> waiting production job -> GitHub reviewer approval -> Cloud Run and Hosting deployment**. In Actions, open the waiting Deploy run, choose **Review deployments**, select **production**, and choose **Approve and deploy**. Chat approval, a PR merge, and a PR review do not substitute for this environment approval. The assistant must leave deployment approval to the user.
 
 Confirm Actions permits the checked-in Google authentication/setup actions, default token permissions remain read-only, and only the Deploy job requests `id-token: write`.
 
@@ -469,7 +471,7 @@ Before proceeding, explicitly approve the first deployment's potential Cloud Run
 2. With explicit approval, commit/push a feature branch and open a PR into main. Obtain separate approval before merging and triggering deployment.
 3. Confirm both required CI checks pass, then merge through the existing ruleset.
 4. Watch **CI** for the main push. Its successful completion triggers **Deploy**, which uses the exact SHA, checks it is still current, and requests the protected production environment.
-5. Approve the environment gate if configured. Watch WIF auth, image build/push, Cloud Run deployment, API health, Firebase deployment, and Hosting rewrite/OpenAPI smoke tests. A stale-SHA rejection means a newer main run should deploy instead.
+5. Deploy must pause for the required `production` reviewer. The user opens **Actions > Deploy > Review deployments**, selects **production**, and chooses **Approve and deploy**. Do not bypass the gate or have the assistant approve on the user's behalf. After approval, watch WIF auth, image build/push, Cloud Run deployment, API health, Firebase deployment, and Hosting rewrite/OpenAPI smoke tests. A stale-SHA rejection means a newer main run should deploy instead.
 6. For setup-only failures, fix configuration, then rerun the CI run originally triggered by the latest main push. Do not bypass WIF, branch, or CI protections to retry.
 
 From the authenticated terminal:
