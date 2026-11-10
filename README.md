@@ -4,6 +4,8 @@
 
 **Your backend stand-in.**
 
+**Live app:** https://doppel-app.web.app
+
 A schema-driven mock REST API generator with realistic seeded data, resource relationships, and an interactive playground. Built with FastAPI, React, and Faker.
 
 ## About
