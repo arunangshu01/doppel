@@ -334,13 +334,24 @@ This follows the portfolio pattern with a separate project:
 
 Scale-to-zero and a maximum instance setting reduce usage, **not guarantee a zero bill or hard cap**. Cold starts reset all state. Multiple revisions can briefly coexist during rollout, and in-memory state is not consistent between them; transient missing playgrounds require regeneration. Runtime instances, registry storage, Secret Manager, Hosting bandwidth, and logging can incur charges. Public API ingress matches the portfolio and also allows direct Cloud Run calls, not just Hosting calls.
 
-### Operational baseline and remaining approvals
+### Monitoring and operational safeguards
 
-Read-only inspection during the hardening work confirmed both instance maximums are 1, the default log bucket retains logs for 30 days, and no custom uptime checks, alert policies, dashboards, or Artifact Registry cleanup policies are configured. This change does not create monitoring resources, change ingress/IAM, modify retention, or delete images.
+The minimal monitoring setup was created in `doppel-101126` after explicit approval of potential usage charges and notification emails:
 
-Use Cloud Run's built-in request, latency, instance, and platform-error views plus deployment smoke tests while monitoring setup is pending. Do not treat every API 5xx as an outage: error simulation is an intentional feature, and capacity rejection is distinct from an unexpected application failure. A same-origin `/doppel/api/health` uptime check can test both Hosting routing and the backend; choose alert conditions and notification recipients explicitly. Periodic probes affect warm/scale-to-zero behavior and can incur usage. An edge firewall may require a load balancer and ingress redesign because the direct Cloud Run URL currently remains public.
+| Resource | Configuration |
+| --- | --- |
+| `doppel API health` uptime check | HTTPS `doppel-app.web.app/doppel/api/health`, every 5 minutes from Asia Pacific, Europe, and Iowa; 30-second timeout; certificate validation, HTTP 200, and JSON `status` equal to `ok` required |
+| `doppel API health failure` alert | At least two regions report failure for 10 minutes; enabled email notifications on incident opening and closing |
+| `doppel health alerts` channel | Enabled email delivery to `arunangshu01@gmail.com`; Google reports no pending verification requirement |
+| `doppel operations` dashboard | Health probe pass fraction, Cloud Run request rate by response class, per-revision p95 latency, and instance count; existing Google Cloud metrics only |
 
-Creating uptime checks, notification channels, alert policies, or dashboards needs a separate cloud-change approval. Review registry cleanup in dry-run mode before approving any deletions, preserving deployed and rollback images. Existing budget alerts and scaling limits are not a hard financial cap. Physical iPhone Safari and Android Chrome checks remain a release checklist item: portrait/landscape, keyboard entry, native selectors, JSON import, clipboard, scroll regions, and safe areas. Automated CI does not certify those device behaviors.
+The alert uses Google's uptime-check pattern: a 20-minute next-older alignment window, cross-region count of failed probes, and a 10-minute sustained threshold. Missing data alone is not configured as a separate outage condition; this is not a guarantee that telemetry loss will be detected. No outage was induced to test email delivery, so actual mailbox delivery remains unproven until an incident or separately approved delivery test.
+
+The health check exercises both Hosting routing and the backend. Intentional mock API error/latency simulation does not affect this endpoint or drive the email alert, although simulated errors and delays remain visible in the request/latency charts. Periodic probes generate requests and logs, affect warm/scale-to-zero behavior, and can incur usage; free allowances and budget alerts are not spending caps. No synthetic functions or custom metric collectors were created.
+
+Both instance maximums remain 1 and the default log bucket retains logs for 30 days. Monitoring setup did not change ingress/IAM, retention, deployed code, or production approval settings, and did not delete images. Artifact Registry cleanup and edge protection remain unconfigured. Review cleanup in dry-run mode before separately approving any deletions, preserving deployed and rollback images. An edge firewall may require a load balancer and ingress redesign because the direct Cloud Run URL is public.
+
+Further monitoring expansion, infrastructure changes, or image deletions require separate approval. Physical iPhone Safari and Android Chrome checks remain a release checklist item: portrait/landscape, keyboard entry, native selectors, JSON import, clipboard, scroll regions, and safe areas. Automated CI does not certify those device behaviors.
 
 ## Manual GCP setup - do these in order
 
