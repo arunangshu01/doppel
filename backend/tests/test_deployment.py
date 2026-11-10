@@ -39,7 +39,8 @@ def test_ci_gate_and_keyless_deployment():
     job = workflow["jobs"]["deploy"]
     for guard in ["conclusion == 'success'", "event == 'push'", "head_branch == 'main'", "head_repository.full_name == github.repository"]:
         assert guard in job["if"]
-    assert job["environment"] == "production"
+    site = json.loads((ROOT / "firebase.json").read_text())["hosting"]["site"]
+    assert job["environment"] == {"name": "production", "url": f"https://{site}.web.app"}
     assert job["permissions"] == {"contents": "read", "id-token": "write"}
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
