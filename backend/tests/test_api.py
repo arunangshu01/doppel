@@ -140,5 +140,73 @@ def test_global_generation_budget(client):
     assert "retry-after" in response.headers
 
 
+@pytest.mark.parametrize('name', ['retail', 'saas', 'blog', 'ecommerce'])
+def test_starter_templates_generate_isolated_apis(client, name):
+    template = client.get(f'{P}/templates/{name}')
+    assert template.status_code == 200
+    created = client.post(f'{P}/playgrounds', json=template.json())
+    assert created.status_code == 201
+    base = created.json()['base_path']
+    for resource in template.json()['resources']:
+        assert client.get(f'{base}/{resource}').json()['total'] > 0
+    assert client.get(f'{P}/stores').status_code == 200
+
+
+def test_template_catalog_and_unknown_template(client):
+    assert {item['id'] for item in client.get(f'{P}/templates').json()['templates']} == {'retail', 'saas', 'blog', 'ecommerce'}
+    assert client.get(f'{P}/templates/unknown').status_code == 404
+
+
+def test_response_simulation_does_not_mutate_data(client, monkeypatch):
+    from unittest.mock import AsyncMock
+    sleep = AsyncMock()
+    monkeypatch.setattr('routers.resources.asyncio.sleep', sleep)
+    one = create(client)
+    base = one['base_path']
+    original = client.get(f'{base}/users').json()
+    error = client.get(f'{base}/users?_status=503&_delay_ms=15')
+    assert error.status_code == 503 and error.json()['simulated'] is True
+    assert error.headers['cache-control'] == 'no-store'
+    sleep.assert_any_await(0.015)
+    empty = client.get(f'{base}/users?_empty=true').json()
+    assert empty['data'] == [] and empty['total'] == 0
+    row = original['data'][0]
+    assert client.get(f'{base}/users/{row["id"]}?_status=500').status_code == 500
+    assert client.get(f'{base}/users').json() == original
+    spec = client.get(f'{base}/openapi.json').json()
+    assert {'_status', '_delay_ms', '_empty'} <= {p['name'] for p in spec['paths']['/users']['get']['parameters']}
+
+
+@pytest.mark.parametrize('query', ['_delay_ms=-1', '_delay_ms=3001', '_status=302', '_status=999', '_empty=maybe'])
+def test_invalid_simulation_rejected(client, query):
+    assert client.get(f'{P}/stores?{query}').status_code == 422
+
+
+def test_simulated_delays_have_a_concurrency_budget(client):
+    one = create(client)
+    client.app.state.store.simulation_requests = 4
+    response = client.get(f'{P}/stores?_delay_ms=1')
+    assert response.status_code == 429
+    assert response.headers['retry-after'] == '1'
+    assert client.get(f'{one["base_path"]}/users?_delay_ms=1').status_code == 429
+    assert client.get(f'{P}/stores').status_code == 200
+    client.app.state.store.simulation_requests = 0
+
+
+def test_simulated_delay_releases_capacity_after_cancellation(client, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from routers.resources import simulate
+
+    async def cancelled(_):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr('routers.resources.asyncio.sleep', cancelled)
+    request = SimpleNamespace(scope={'doppel_store': client.app.state.store})
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(simulate(request, 1, '200'))
+    assert client.app.state.store.simulation_requests == 0
+
+
 def test_unknown_session_does_not_expose_demo(client):
     assert client.get(f"{P}/playgrounds/unknown/stores").status_code == 404

@@ -50,6 +50,7 @@ class PlaygroundStore:
         self.max_sessions = 20
         self.max_cells = 200000
         self.max_generations = 12
+        self.simulation_requests = 0
 
     def prune(self):
         now = time.monotonic()
@@ -111,4 +112,4 @@ class DatasetGateway:
                 await JSONResponse({"detail": exc.detail}, status_code=exc.status_code)(scope, receive, send)
                 return
             scope = {**scope, "root_path": scope.get("root_path", "") + "/" + session_id}
-        await target.app(scope, receive, send)
+        await target.app({**scope, 'doppel_store': self.store}, receive, send)

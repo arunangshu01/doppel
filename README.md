@@ -27,8 +27,12 @@ Python 3.12 + FastAPI, React + Vite, and Faker. Local development needs no datab
 
 - Seeded UUID, person, email, date, datetime, money, integer, float, boolean, enum, sentence, and word generators.
 - Foreign-key references, pagination, exact-match filtering, sorting, and per-dataset OpenAPI docs.
-- Retail starter template: 5 stores, 30 SKUs, and 100 linked transactions.
-- Resource navigation, Table/JSON response views, JSON formatting, cURL copying, and schema downloads.
+- Retail, SaaS users/projects/tasks, blog authors/posts/comments, and e-commerce customers/products/orders starter templates.
+- Resource navigation, Table/JSON views, pagination/filter/sort controls, and cURL copying with the applied request parameters.
+- JSON formatting, schema downloads, and local JSON import (up to 128 KiB); imports and template/locale changes stay drafts until generation succeeds.
+- Numeric and date constraints with five supported Faker locales, retaining deterministic generation.
+- Bounded request-only delay, HTTP error, and empty-list simulation, without changing stored data.
+- Responsive creator attribution with accessible GitHub and email icon links.
 - Dark, Light, and System themes with a responsive layout.
 
 | Mode | Access | Behavior |
@@ -76,9 +80,9 @@ Open <http://localhost:5173>. The local API is at <http://127.0.0.1:8000/doppel/
 ### Playground workflow
 
 1. The UI opens the public demo and previews its resources without creating a playground.
-2. Edit the JSON or use **Load retail template**. **Format JSON** only formats the editor.
-3. Set the seed and counts, then select **Generate API**. This creates your own playground, not a replacement for the public demo.
-4. Select a resource, inspect its first five rows in **Table** or **JSON**, use **Copy cURL**, or open **API docs** for the currently selected dataset.
+2. Edit the JSON, use **Import schema** to restore a downloaded file, or choose a **Starter template** and load it. **Format JSON** only formats the editor.
+3. Set the seed, locale, counts, and optional field constraints, then select **Generate API**. The editor shows draft rows and cells; visitor playgrounds are limited to 20000 cells. Generation creates your own playground, not a replacement for the public demo.
+4. Select a resource and inspect **Table** or **JSON** responses. Use **Request query** to set page/size, sorting, and an exact-match filter, then **Apply query**. The default preview shows five rows. **Copy cURL** and the endpoint link use the applied query; **API docs** describes the selected dataset. Expand **Simulate a response** for request-only delay, empty-list, and HTTP error controls.
 5. Use **Public demo** and **My playground** to switch previews. Editor changes do not affect a published dataset until generation succeeds.
 6. Use **Download schema** before leaving or sharing the endpoint. Reloading the page returns to the public demo; playground URLs are not automatically restored from browser storage.
 7. For admin publishing, open **Admin publishing**, enter the token, select **Publish shared demo**, and confirm replacement. The token is never included in the frontend build or saved in browser storage. It is cleared on submission, panel close, or **Clear token**. Missing backend configuration disables admin publishing; it does not disable visitor generation.
@@ -103,6 +107,14 @@ The relative URL works on doppel Hosting or through the Vite proxy. In another a
 The logo uses two paired lowercase `d` forms to represent a stand-in for a real backend. The mint SVG is shared by the header, footer, favicon, and README: [`frontend/public/logo.svg`](frontend/public/logo.svg).
 
 The **Color theme** selector supports Dark, Light, and System. System follows OS changes. Preferences are saved under `doppel-theme` in browser local storage when available and applied early during page loading. This is not a cross-device setting.
+
+### Responsive layout
+
+The workbench uses two panels on larger desktops and stacks them at 1280px and below. Phones and tablets up to 1024px use horizontally scrollable resource navigation. Smaller screens get quick links between the schema editor and response explorer, wrapping toolbars, and single-column controls at the narrowest widths. Wide tables and JSON scroll within keyboard-focusable response regions rather than widening the page.
+
+Interactive controls have 44px minimum heights, with 44px icon and response-tab targets. Text-entry controls use 16px text on touch/narrow layouts to avoid iOS focus zoom. The viewport permits pinch zoom, supports display cutout safe areas, and uses stable viewport units so browser chrome changes do not constantly resize the editor.
+
+For responsive QA, check 280, 320, 390, 768, 1024, 1280, 1440, 1920, and 2560 CSS-pixel widths, phone landscape, long resource/field names, wide responses, and zoomed reflow. Jest verifies behavior and accessible structure, not CSS geometry; use a real browser for overflow, scrolling, and touch-target checks. Chrome device emulation does not replace physical iOS/Android checks for keyboards, native pickers, safe areas, and touch gestures.
 
 ## Schema format
 
@@ -153,6 +165,26 @@ Every resource requires a UUID `id`. `count` defaults to 20 and `seed` to 42. Ty
 
 The same schema and seed reproduce data with the same dependency versions. Fixed date bounds avoid dependence on the current clock. Forward, self, and mutual resource references work when each reference chain ultimately resolves to a concrete field. Transaction amounts are independent synthetic values, not calculated SKU totals.
 
+### Constraints and locales
+
+The optional top-level `locale` defaults to `en_US`; supported values are `en_US`, `en_IN`, `en_GB`, `fr_FR`, and `de_DE`. Select it in the editor toolbar or set it in JSON. Locales affect the Faker providers available for that locale; some providers fall back to Faker defaults. Changing locale changes generated data, not UI language, currency, or numeric formatting.
+
+Fields can use these object forms:
+
+```json
+{
+  "age": {"type": "int", "min": 18, "max": 65},
+  "price": {"type": "money", "min": 1.25, "max": 250},
+  "score": {"type": "float", "min": -1, "max": 1},
+  "joined": {"type": "date", "start": "2024-01-01", "end": "2024-12-31"},
+  "created": {"type": "datetime", "start": "2024-01-01T00:00:00", "end": "2024-12-31T23:59:59"}
+}
+```
+
+These are entries inside a resource's `fields`, alongside its required UUID `id`. Bounds are inclusive. Numeric constraints must be finite and within +/-1 billion; integer bounds must be whole numbers, and money ranges must include a non-negative whole-cent value. When one numeric bound is omitted, it defaults to 0 or 10000. Without numeric constraints, the original type defaults in the table apply.
+
+Date bounds use fixed ISO values between 1900 and 2100. Missing date bounds default to 2020-01-01 or 2025-01-01. Datetimes are timezone-free with whole-second precision. Reversed ranges, fractional integer bounds, unsupported locales, and constraints on incompatible field types are rejected before replacing a dataset. Enum fields continue to use `values`.
+
 ### Limits
 
 - At most 20 resources, 1000 rows/resource, 50 fields/resource, and 100000 cells/schema.
@@ -175,7 +207,8 @@ All API routes use `/doppel/api`. Firebase forwards this prefix unchanged to Clo
 | `GET /doppel/api/health` | `{"status":"ok"}` |
 | `GET /doppel/api/demo` | Shared demo manifest, base path, and schema |
 | `GET /doppel/api/schema` | Current shared demo schema |
-| `GET /doppel/api/templates/retail` | Built-in starter schema |
+| `GET /doppel/api/templates` | Starter catalog with IDs and resource names |
+| `GET /doppel/api/templates/{name}` | Starter schema: `retail`, `saas`, `blog`, or `ecommerce`; unknown names return 404 |
 | `POST /doppel/api/playgrounds` | Create an isolated playground; returns 201 with `id`, `base_path`, `expires_at`, seed, and resource endpoints |
 | `GET /doppel/api/playgrounds/{id}` | Playground manifest |
 | `GET /doppel/api/playgrounds/{id}/schema` | Playground schema |
@@ -196,6 +229,17 @@ curl http://127.0.0.1:8000/doppel/api/stores
 curl 'http://127.0.0.1:8000/doppel/api/transactions?page=2&limit=10&sort=amount&order=desc'
 curl 'http://127.0.0.1:8000/doppel/api/transactions?status=completed'
 ```
+
+### Response simulation
+
+In the response explorer, expand **Simulate a response**, choose controls, and select **Apply query**. The endpoint link and copied cURL include the applied options. **Reset query** restores the default request. A simulated error is displayed with its HTTP status and JSON body; simulated 404s do not discard the current visitor playground.
+
+- `_delay_ms=0..3000` delays a resource list or item response asynchronously. At most four delayed requests run concurrently per process, shared across demo and visitor datasets. Overflow returns 429 with `Retry-After: 1`; ordinary undelayed reads remain available.
+- `_status=200|400|401|403|404|429|500|503` selects the response status. Non-200 simulation returns a JSON body with `simulated: true` and an `X-Doppel-Simulated` header. Other statuses are rejected.
+- `_empty=true` makes a list return an empty `data` array and total 0. It does not delete rows. This option applies only to resource lists, not item lookups.
+- Delay precedes a simulated error; a selected error takes precedence over an empty list. Normal queries without these options retain their original behavior.
+
+For example, append `?_delay_ms=500&_status=503` to a resource URL to test a delayed service failure, or `?_empty=true` to test an empty list. These options appear in dataset OpenAPI documentation. They do not simulate network disconnection, bypass resource/session existence checks, or provide comprehensive rate limiting. Delays keep requests in flight and can incur runtime costs even though bounded.
 
 API responses use `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Uvicorn access logs are disabled to avoid adding another log of unlisted playground paths; Cloud Run and Hosting infrastructure may still record request URLs. Never treat capability URLs or synthetic schemas as secret storage.
 

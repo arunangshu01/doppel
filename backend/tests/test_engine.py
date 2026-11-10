@@ -36,6 +36,57 @@ def test_seeded_types_and_relationships():
     assert all(row["amount"] >= 0 for row in data["orders"])
 
 
+def test_locale_and_numeric_date_constraints_are_deterministic():
+    schema = SchemaInput.model_validate({"seed": 5, "locale": "en_IN", "resources": {"people": {"count": 30, "fields": {
+        "id": "uuid", "name": "person", "age": {"type": "int", "min": 18, "max": 21},
+        "price": {"type": "money", "min": 1.25, "max": 2.50},
+        "score": {"type": "float", "min": -2.5, "max": 2.5},
+        "born": {"type": "date", "start": "2000-01-01", "end": "2000-01-03"},
+        "created": {"type": "datetime", "start": "2024-01-01T00:00:00", "end": "2024-01-01T00:00:01"}
+    }}}})
+    data = generate(schema)
+    assert data == generate(schema)
+    for row in data['people']:
+        assert 18 <= row['age'] <= 21
+        assert 1.25 <= row['price'] <= 2.5
+        assert -2.5 <= row['score'] <= 2.5
+        assert '2000-01-01' <= row['born'] <= '2000-01-03'
+        assert '2024-01-01T00:00:00' <= row['created'] <= '2024-01-01T00:00:01'
+
+
+@pytest.mark.parametrize('field', [
+    {'type': 'int', 'min': 2, 'max': 1}, {'type': 'int', 'min': 1.5},
+    {'type': 'float', 'min': float('inf')}, {'type': 'money', 'min': -1},
+    {'type': 'word', 'min': 1}, {'type': 'date', 'start': 'bad'},
+    {'type': 'date', 'start': ''},
+    {'type': 'date', 'start': '2025-01-01', 'end': '2020-01-01'},
+    {'type': 'datetime', 'start': '2020-01-01T00:00:00+01:00'},
+    {'type': 'datetime', 'start': '2020-01-01T00:00:00.500000'},
+    {'type': 'int', 'min': True}, {'type': 'money', 'min': 1.231, 'max': 1.239},
+])
+def test_invalid_constraints_rejected(field):
+    with pytest.raises(ValidationError):
+        SchemaInput.model_validate({'resources': {'items': {'fields': {'id': 'uuid', 'value': field}}}})
+
+
+def test_equal_bounds_and_exact_cent_values():
+    schema = SchemaInput.model_validate({'resources': {'items': {'count': 3, 'fields': {
+        'id': 'uuid', 'quantity': {'type': 'int', 'min': -3, 'max': -3},
+        'price': {'type': 'money', 'min': 1.15, 'max': 1.15},
+        'score': {'type': 'float', 'min': 0, 'max': 0},
+        'day': {'type': 'date', 'start': '2000-02-29', 'end': '2000-02-29'},
+        'instant': {'type': 'datetime', 'start': '2024-01-01T12:00:00', 'end': '2024-01-01T12:00:00'}
+    }}}})
+    for row in generate(schema)['items']:
+        assert row['quantity'] == -3 and row['price'] == 1.15 and row['score'] == 0
+        assert row['day'] == '2000-02-29' and row['instant'] == '2024-01-01T12:00:00'
+
+
+def test_unknown_locale_rejected():
+    with pytest.raises(ValidationError):
+        SchemaInput.model_validate({'locale': 'missing_locale', 'resources': {'items': {'fields': {'id': 'uuid'}}}})
+
+
 def test_retail_template():
     data = generate(SchemaInput.model_validate(RETAIL))
     assert set(data) == {"stores", "skus", "transactions"}
