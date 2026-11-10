@@ -190,13 +190,18 @@ Date bounds use fixed ISO values between 1900 and 2100. Missing date bounds defa
 - At most 20 resources, 1000 rows/resource, 50 fields/resource, and 100000 cells/schema.
 - Visitor playgrounds are additionally limited to 20000 cells each.
 - Each process holds at most 20 visitor playgrounds and 200000 visitor cells total, separate from the shared demo.
-- Generation is serialized off the event loop and limited to 12 attempts/minute per process across visitor generation and authorized admin publishing. Capacity checks can reject work before consuming this budget.
-- Generation rate overflow returns 429 with Retry-After. Full playground capacity returns 503; expired or unknown IDs return 404. Expired entries are pruned lazily on playground operations, without a background task keeping Cloud Run active.
-- POST/PUT request bodies are capped at 128 KiB, including streamed bodies, before JSON parsing.
+- Generation runs off the event loop with at most one active operation and no waiting generation queue. Busy generation returns 429 with `Retry-After: 1`. The existing generation budget remains 12 attempts/minute per process across visitor generation and authorized admin publishing; capacity checks can reject work before consuming it.
+- Shared request budgets allow 600 ordinary API requests/minute and 60 POST/PUT attempts/minute per process. `/health` has a separate 60-request/minute reserve so ordinary read saturation does not consume the health budget.
+- Each verified anonymous fairness identifier allows 120 reads and 3 POST/PUT attempts per minute. Each visitor playground additionally allows 240 reads and 3 writes per minute, shared across callers. Invalid schema/auth attempts consume the request budget too.
+- Limiter state is capped at 2048 active budget entries, with idle entries pruned after 60 seconds. New entries fail closed with 429 when full. Quotas use rolling 60-second windows and real 429s include a positive `Retry-After`; the UI displays this delay without automatic retries.
+- Full playground capacity returns 503; expired or unknown IDs return 404. Expired entries are pruned lazily on playground operations, without a background task keeping Cloud Run active.
+- POST/PUT request bodies are capped at 128 KiB, including streamed bodies, with a 5-second upload deadline before JSON parsing. Oversized bodies return 413; slow uploads return 408. URLs are limited to 8 KiB and request headers to 16 KiB, returning 414 and 431 respectively.
 - Resource/field names start with a lowercase letter, use lowercase letters, digits, and underscores, and have at most 48 characters.
 - Reserved resources: `api`, `docs`, `redoc`, `openapi`, `health`, `schema`, `templates`, `playgrounds`, `demo`. Reserved fields: `page`, `limit`, `sort`, `order`.
 
-These per-process safeguards bound retained data and generation work. They are not durable distributed quotas, per-user authentication, comprehensive abuse protection, or a spending cap. An attacker can still exhaust public capacity or drive request costs. Review usage before promoting the public URL widely.
+The API issues an opaque, signed, 30-minute `X-Doppel-Client` fairness identifier on admitted requests that do not have a valid one. The workbench holds it only in memory and sends it on subsequent API calls. It uses no cookie, contains only randomness and an issuance time rather than an IP address, is never included in schemas/cURL downloads, and grants no authentication or playground ownership. API consumers may echo this response header; requests without a verified identifier share an anonymous budget. Allowed cross-origin browser clients can read this header and `Retry-After` through CORS. Identifiers and all quotas reset on process restart.
+
+The server does not trust forwarded IP headers for rate limiting: Firebase Hosting proxies requests, and the direct Cloud Run endpoint is public. Signed identifiers provide best-effort fairness, not durable user identity; callers can obtain new identifiers. Global and per-playground limits still apply, but attackers can exhaust public capacity or drive request costs. These safeguards are not distributed quotas, an edge firewall, DDoS protection, authentication, or a spending cap. Edge controls, stronger identity/challenges, and monitoring require a separate infrastructure review before wide promotion.
 
 ## REST API
 
@@ -271,9 +276,15 @@ From `frontend/`:
 ```bash
 npm test -- --ci
 npm run build
+npm run test:browser
+npm audit --omit=dev --audit-level=low
 ```
 
-Backend tests cover deterministic types, references, schema validation, REST queries, session isolation/expiry/capacity, body limits, rate limits, admin authorization, no-cache headers, and prefixed docs. Jest/RTL tests cover the public demo, visitor generation/updates, mode switching, admin confirmation/token clearing, themes, JSON formatting, keyboard tabs, copying, and errors. Frontend tests mock HTTP and do not verify a real browser or cloud service.
+Backend tests cover deterministic types, references, schema validation, REST queries, session isolation/expiry/capacity, upload limits/deadlines, fair-use limits, identifier tampering, bounded limiter state, generation admission, admin authorization, no-cache headers, CORS, prefixed docs, and CI/deployment configuration. Jest/RTL tests mock HTTP and cover workbench behavior, signed-identifier forwarding, retry feedback, and structural accessibility. JSDOM cannot measure CSS contrast, so that rule is checked in real Chrome instead.
+
+`test:browser` serves the production build on an isolated local port, starts a fresh temporary Chrome profile, and uses mocked API fixtures with long names/wide rows. It checks both themes across phone, tablet, desktop, landscape, and zoom-equivalent layouts; automated axe accessibility checks including color contrast; touch-target sizes; internal table/JSON scrolling; and keyboard skip navigation. It makes no production API calls. Chrome must be installed (`CHROME_BIN` can override its executable); Node.js 22 or newer is required. CI runs this check inside the existing required frontend job. Physical iOS/Android keyboards, pickers, clipboard behavior, notches, and touch gestures still need manual checks.
+
+The production dependency audit is a CI gate. A full `npm audit` currently reports six low-severity test-toolchain findings stemming from the unpatched `deepmerge` advisory [GHSA-gcqx-w48m-w2h4](https://github.com/advisories/GHSA-gcqx-w48m-w2h4). These packages are not shipped in the browser bundle; Jest configuration is trusted repository code. Track an upstream fix rather than forcing the breaking Jest downgrade suggested by npm. No dependency security settings or audit policies are weakened.
 
 From the repository root, with Docker Desktop running:
 
@@ -322,6 +333,14 @@ This follows the portfolio pattern with a separate project:
 - There is deliberately no manual Deploy dispatch that bypasses the CI-success gate. To retry setup failures, rerun the CI run whose original event was the latest main push; a successful completion triggers Deploy again. A manually dispatched CI run does not qualify.
 
 Scale-to-zero and a maximum instance setting reduce usage, **not guarantee a zero bill or hard cap**. Cold starts reset all state. Multiple revisions can briefly coexist during rollout, and in-memory state is not consistent between them; transient missing playgrounds require regeneration. Runtime instances, registry storage, Secret Manager, Hosting bandwidth, and logging can incur charges. Public API ingress matches the portfolio and also allows direct Cloud Run calls, not just Hosting calls.
+
+### Operational baseline and remaining approvals
+
+Read-only inspection during the hardening work confirmed both instance maximums are 1, the default log bucket retains logs for 30 days, and no custom uptime checks, alert policies, dashboards, or Artifact Registry cleanup policies are configured. This change does not create monitoring resources, change ingress/IAM, modify retention, or delete images.
+
+Use Cloud Run's built-in request, latency, instance, and platform-error views plus deployment smoke tests while monitoring setup is pending. Do not treat every API 5xx as an outage: error simulation is an intentional feature, and capacity rejection is distinct from an unexpected application failure. A same-origin `/doppel/api/health` uptime check can test both Hosting routing and the backend; choose alert conditions and notification recipients explicitly. Periodic probes affect warm/scale-to-zero behavior and can incur usage. An edge firewall may require a load balancer and ingress redesign because the direct Cloud Run URL currently remains public.
+
+Creating uptime checks, notification channels, alert policies, or dashboards needs a separate cloud-change approval. Review registry cleanup in dry-run mode before approving any deletions, preserving deployed and rollback images. Existing budget alerts and scaling limits are not a hard financial cap. Physical iPhone Safari and Android Chrome checks remain a release checklist item: portrait/landscape, keyboard entry, native selectors, JSON import, clipboard, scroll regions, and safe areas. Automated CI does not certify those device behaviors.
 
 ## Manual GCP setup - do these in order
 

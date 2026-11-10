@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routers.playground import router
 from source.playgrounds import DatasetGateway, PlaygroundStore
-from utility.http import APIGuards
+from utility.http import APIGuards, AbuseLimits
 from utility.settings import ADMIN_TOKEN, API_PREFIX, CORS_ORIGINS, HOST, PORT
 
 
@@ -15,8 +15,10 @@ def create_app(admin_token=None):
     app.include_router(router, prefix=API_PREFIX)
     app.mount(f"{API_PREFIX}/playgrounds", DatasetGateway(app.state.store, visitors=True))
     app.mount(API_PREFIX, DatasetGateway(app.state.store))
-    app.add_middleware(APIGuards)
-    app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST", "PUT"], allow_headers=["Content-Type", "Authorization"])
+    app.state.abuse = AbuseLimits()
+    app.add_middleware(APIGuards, abuse=app.state.abuse)
+    app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST", "PUT"],
+                       allow_headers=["Content-Type", "Authorization", "X-Doppel-Client"], expose_headers=["Retry-After", "X-Doppel-Client"])
     return app
 
 

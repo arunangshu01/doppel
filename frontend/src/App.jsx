@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import './App.css';
 
-async function request(url, options) {
-  const response = await fetch(url, options);
+async function request(url, options, client) {
+  const response = await fetch(url, client?.current ? { ...options, headers: { ...options?.headers, 'X-Doppel-Client': client.current } } : options);
+  const identifier = response.headers?.get?.('X-Doppel-Client');
+  if (client && identifier && identifier.length <= 128) client.current = identifier;
   let body;
   try {
     body = await response.json();
@@ -15,6 +17,11 @@ async function request(url, options) {
     error.status = response.status;
     error.body = body;
     error.simulated = body.simulated === true;
+    const retry = Number(response.headers?.get?.('Retry-After'));
+    if (response.status === 429 && !error.simulated && Number.isFinite(retry) && retry > 0) {
+      error.retryAfter = Math.min(3600, Math.ceil(retry));
+      error.message += ` Try again in ${error.retryAfter} seconds.`;
+    }
     throw error;
   }
   return body;
@@ -62,6 +69,8 @@ export default function App({ apiBase = '/doppel/api' }) {
   const [queryRun, setQueryRun] = useState(0);
   const [previewFailure, setPreviewFailure] = useState(null);
   const queryForm = useRef(null);
+  const clientIdentity = useRef('');
+  const apiRequest = (url, options) => request(url, options, clientIdentity);
   const stats = schemaStats(editor);
   const dirty = published !== null && published !== editor;
   const docsBase = previewBase;
@@ -94,7 +103,7 @@ export default function App({ apiBase = '/doppel/api' }) {
 
   useEffect(() => {
     let cancelled = false;
-    request(`${apiBase}/demo`).then((manifest) => {
+    apiRequest(`${apiBase}/demo`).then((manifest) => {
       if (!cancelled) {
         const text = JSON.stringify(manifest.schema, null, 2);
         setEditor(text);
@@ -116,7 +125,7 @@ export default function App({ apiBase = '/doppel/api' }) {
     setSample(null);
     setPreviewFailure(null);
     setError('');
-    request(`${previewBase}/${active}?${query}`, { signal: controller.signal }).then((body) => {
+    apiRequest(`${previewBase}/${active}?${query}`, { signal: controller.signal }).then((body) => {
       if (!cancelled) setSample(body);
     }).catch((err) => {
       if (!cancelled) {
@@ -141,7 +150,7 @@ export default function App({ apiBase = '/doppel/api' }) {
     setBusy(true);
     try {
       const target = session ? `${apiBase}/playgrounds/${session.id}` : `${apiBase}/playgrounds`;
-      const manifest = await request(target, {
+      const manifest = await apiRequest(target, {
         method: session ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(schema),
       });
       setSession(manifest);
@@ -161,7 +170,7 @@ export default function App({ apiBase = '/doppel/api' }) {
     setBusy(true);
     setError('');
     try {
-      const schema = await request(`${apiBase}/templates/${templateName}`);
+      const schema = await apiRequest(`${apiBase}/templates/${templateName}`);
       setEditor(JSON.stringify(schema, null, 2));
     } catch (err) {
       setError(err.message);
@@ -209,7 +218,7 @@ export default function App({ apiBase = '/doppel/api' }) {
     setError('');
     try {
       const schema = JSON.parse(editor);
-      const manifest = await request(`${apiBase}/schema`, {
+      const manifest = await apiRequest(`${apiBase}/schema`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(schema),
       });
       setDemo({ ...manifest, schema });
@@ -284,6 +293,7 @@ export default function App({ apiBase = '/doppel/api' }) {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#playground">Skip to playground</a>
       <header className="topbar">
         <a className="brand" href="/" aria-label="doppel home"><img src="/logo.svg" width="34" height="34" alt="" /><span>doppel</span><span className="version">PLAYGROUND</span></a>
         <div className="header-actions"><a className="docs-link" href={`${docsBase}/docs`} target="_blank" rel="noreferrer">API docs <span aria-hidden="true">↗</span></a><span className="header-divider" /><label className="theme-control"><span className="theme-icon" aria-hidden="true">◐</span><span className="sr-only">Color theme</span><select aria-label="Color theme" value={theme} onChange={(event) => setTheme(event.target.value)}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label></div>
@@ -297,7 +307,7 @@ export default function App({ apiBase = '/doppel/api' }) {
           <nav aria-label="Resources" className="resource-nav">{resources.length ? resources.map((resource) => <button type="button" aria-pressed={active === resource.name} className={active === resource.name ? 'resource-active' : ''} onClick={() => { setActive(resource.name); setQuery('limit=5'); }} key={resource.name}><span className="resource-symbol" aria-hidden="true">#</span><span className="resource-name" title={resource.name}>{resource.name}</span><span className="resource-count">{resource.count}</span></button>) : <p className="sidebar-hint">Generate your schema to explore its resources.</p>}</nav>
           <div className="sidebar-bottom"><span className={`connection-dot ${connected ? 'connected' : ''}`} /><div>{connected ? 'Backend connected' : busy ? 'Connecting to backend' : 'Connection unavailable'}<small title={apiBase}>{apiBase}</small></div></div>
         </aside>
-        <main id="playground">
+        <main id="playground" tabIndex="-1">
           <div className="breadcrumbs">Workspace <span>/</span> <strong>API playground</strong></div>
           <section className="intro"><div><p className="eyebrow">SCHEMA IN. API OUT.</p><h1>Your backend stand-in.</h1><p>Build against real-looking data. Ship before the backend is ready.</p></div><span className="environment"><span className="connection-dot connected" />{mode === 'demo' ? 'Public demo' : 'Isolated playground'}</span></section>
           <div className="workflow-strip"><span><b>01</b> Define a schema</span><span className="workflow-arrow" aria-hidden="true">→</span><span><b>02</b> Generate seeded data</span><span className="workflow-arrow" aria-hidden="true">→</span><span><b>03</b> Build with your API</span><span className="workflow-note">No database. No setup.</span></div>

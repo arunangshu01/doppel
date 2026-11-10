@@ -72,6 +72,8 @@ class PlaygroundStore:
         self.generations.append(now)
 
     async def save(self, schema, session_id=None, admin=False):
+        if self.lock.locked():
+            raise HTTPException(429, 'Generation is already in progress. Retry shortly.', headers={'Retry-After': '1'})
         async with self.lock:
             self.prune()
             previous = self.get(session_id) if session_id else None

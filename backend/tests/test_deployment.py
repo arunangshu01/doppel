@@ -31,6 +31,19 @@ def test_workflows_use_supported_actions_and_pinned_runners():
                     assert version == actions[action]
 
 
+def test_ci_requires_browser_accessibility_and_production_dependency_audit():
+    workflow = load_yaml('.github/workflows/ci.yml')
+    assert workflow['permissions'] == {'contents': 'read'}
+    frontend = workflow['jobs']['frontend']
+    assert frontend['name'] == 'Frontend tests and build'
+    commands = [step.get('run', '') for step in frontend['steps']]
+    assert commands.index('npm run build') < commands.index('npm run test:browser')
+    assert 'npm audit --omit=dev --audit-level=low' in commands
+    package = json.loads((ROOT / 'frontend/package.json').read_text())
+    assert package['scripts']['test:browser'] == 'node browser-check.mjs'
+    assert package['devDependencies']['axe-core'] == '4.10.3'
+
+
 def test_ci_gate_and_keyless_deployment():
     workflow = load_yaml(".github/workflows/deploy.yml")
     assert set(workflow["on"]) == {"workflow_run"}

@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
+import axe from 'axe-core';
 
 const schema = { seed: 42, resources: { users: { count: 2, fields: { id: 'uuid', name: 'person' } } } };
 const manifest = { id: 'session-a', base_path: '/doppel/api/playgrounds/session-a', expires_at: '2030-01-01T00:00:00Z', resources: [{ name: 'users', count: 2, endpoint: '/doppel/api/playgrounds/session-a/users' }] };
@@ -19,9 +20,44 @@ beforeEach(() => {
 
 afterEach(() => jest.restoreAllMocks());
 
+test('keeps the anonymous fairness identifier in memory and forwards it on API calls', async () => {
+  const identifier = 'anonymous-fair-use-test';
+  global.fetch.mockImplementation((url) => {
+    if (url === '/doppel/api/demo') return Promise.resolve({ ok: true, headers: { get: (name) => name === 'X-Doppel-Client' ? identifier : null }, json: async () => demo });
+    return response({ data: [{ id: '123', name: 'Ada Lovelace' }], total: 2 });
+  });
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/users?'), expect.objectContaining({ headers: { 'X-Doppel-Client': identifier } }));
+  expect(Object.values(localStorage)).not.toContain(identifier);
+});
+
+test('shows a real rate-limit retry delay without automatically retrying', async () => {
+  global.fetch.mockImplementation((url) => url === '/doppel/api/demo' ? response(demo) : Promise.resolve({ ok: false, status: 429, headers: { get: (name) => name === 'Retry-After' ? '60' : null }, json: async () => ({ detail: 'Fair-use request limit reached.' }) }));
+  render(<App />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Try again in 60 seconds.');
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+test('does not mistake a simulated 429 for an actual fair-use limit', async () => {
+  global.fetch.mockImplementation((url) => url === '/doppel/api/demo' ? response(demo) : Promise.resolve({ ok: false, status: 429, headers: { get: (name) => name === 'Retry-After' ? '60' : null }, json: async () => ({ detail: 'Simulated HTTP 429 response', simulated: true }) }));
+  render(<App />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Simulated HTTP 429 response');
+  expect(screen.getByRole('alert')).not.toHaveTextContent('Try again');
+});
+
+test('passes structural accessibility checks for the loaded workbench', async () => {
+  const { container } = render(<App />);
+  await screen.findByText('Ada Lovelace');
+  const result = await axe.run(container, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'best-practice'] }, rules: { 'color-contrast': { enabled: false } } });
+  expect(result.violations.map(({ id, nodes }) => ({ id, targets: nodes.map(({ target }) => target) }))).toEqual([]);
+});
+
 test('provides quick navigation between the editor and response explorer', async () => {
   render(<App />);
   await screen.findByText('Ada Lovelace');
+  expect(screen.getByRole('link', { name: 'Skip to playground' })).toHaveAttribute('href', '#playground');
+  expect(screen.getByRole('main')).toHaveAttribute('tabindex', '-1');
   expect(screen.getByRole('link', { name: 'Jump to schema editor' })).toHaveAttribute('href', '#schema-editor');
   expect(screen.getByRole('link', { name: 'Jump to response explorer' })).toHaveAttribute('href', '#response-explorer');
   expect(screen.getByLabelText('Schema JSON').closest('form')).toHaveAttribute('id', 'schema-editor');
