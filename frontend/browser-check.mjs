@@ -129,6 +129,7 @@ try {
         return { width:innerWidth, pageWidth:document.documentElement.scrollWidth, tableScroll:table.scrollLeft,
           shortControls:[...document.querySelectorAll('button,select,input:not([type=file]):not([type=checkbox]),.schema-import,summary,.docs-link,.brand,.creator-attribution a,.workspace-jumps a')].filter(visible).filter(element=>element.getBoundingClientRect().height<43.9).map(element=>element.getAttribute('aria-label')||element.tagName),
           smallTabs:[...document.querySelectorAll('[role=tab]')].filter(element=>element.getBoundingClientRect().width<43.9).length,
+          unpaddedSelects:[...document.querySelectorAll('select')].filter(visible).filter(element=>{const style=getComputedStyle(element); return style.appearance!=='none' || parseFloat(style.paddingRight)<36 || style.backgroundImage==='none' || !style.backgroundPositionX.includes('16px') || !style.backgroundPositionX.includes('12px');}).map(element=>element.getAttribute('aria-label')||element.name),
           smallInputs:[...document.querySelectorAll('input:not([type=file]):not([type=checkbox]),select,textarea')].filter(visible).filter(element=>parseFloat(getComputedStyle(element).fontSize)<16).length };
       })()`);
       assert.equal(geometry.width, width, scene);
@@ -136,6 +137,7 @@ try {
       assert.ok(geometry.tableScroll > 0, `${scene}: wide table must scroll internally`);
       assert.deepEqual(geometry.shortControls, [], `${scene}: touch-target height`);
       assert.equal(geometry.smallTabs, 0, `${scene}: response-tab target width`);
+      assert.deepEqual(geometry.unpaddedSelects, [], `${scene}: dropdown arrow/text spacing`);
       if (touch) assert.equal(geometry.smallInputs, 0, `${scene}: touch input font size`);
       const violations = await session.evaluate(`axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa','wcag22aa','best-practice']}}).then(result=>result.violations.map(({id,nodes})=>({id,targets:nodes.map(({target})=>target)})))`);
       assert.deepEqual(violations, [], `${scene}: accessibility violations`);
@@ -147,6 +149,10 @@ try {
       console.log(`PASS ${scene}: accessibility, overflow, controls, table/JSON scrolling`);
     }
   }
+  await session.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+  const forcedSelects = await session.evaluate(`(() => { const selects=[...document.querySelectorAll('select')]; return selects.length>0 && selects.every(element=>{ const style=getComputedStyle(element); return style.appearance==='auto' && style.backgroundImage==='none' && parseFloat(style.paddingRight)>=36; }); })()`);
+  assert.ok(forcedSelects, 'Forced-colors mode must restore native dropdown arrows with text padding');
+  await session.send('Emulation.setEmulatedMedia', { features: [] });
   await session.send('Page.reload', { ignoreCache: true });
   ready = false;
   for (let attempt = 0; attempt < 200; attempt++) {
