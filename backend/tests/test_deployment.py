@@ -14,6 +14,23 @@ def load_yaml(path):
     return yaml.load((ROOT / path).read_text(), Loader=yaml.BaseLoader)
 
 
+def test_workflows_use_supported_actions_and_pinned_runners():
+    actions = {
+        "actions/checkout": "v7.0.1",
+        "actions/setup-python": "v7.1.0",
+        "actions/setup-node": "v7.1.0",
+        "google-github-actions/auth": "v3",
+        "google-github-actions/setup-gcloud": "v3",
+    }
+    for path in [".github/workflows/ci.yml", ".github/workflows/deploy.yml"]:
+        for job in load_yaml(path)["jobs"].values():
+            assert job["runs-on"] == "ubuntu-24.04"
+            for step in job["steps"]:
+                if "uses" in step:
+                    action, version = step["uses"].rsplit("@", 1)
+                    assert version == actions[action]
+
+
 def test_ci_gate_and_keyless_deployment():
     workflow = load_yaml(".github/workflows/deploy.yml")
     assert set(workflow["on"]) == {"workflow_run"}
