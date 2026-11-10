@@ -1,4 +1,6 @@
 from datetime import datetime
+from decimal import Decimal
+from math import ceil, floor
 
 from faker import Faker
 
@@ -6,7 +8,7 @@ from model.schema import SchemaInput
 
 
 def generate(schema: SchemaInput) -> dict[str, list[dict]]:
-    fake = Faker("en_US")
+    fake = Faker(schema.locale)
     fake.seed_instance(schema.seed)
     generators = {
         "uuid": fake.uuid4,
@@ -21,6 +23,21 @@ def generate(schema: SchemaInput) -> dict[str, list[dict]]:
         "sentence": fake.sentence,
         "word": fake.word,
     }
+    def value(spec):
+        if spec.min is not None or spec.max is not None:
+            low, high = spec.numeric_bounds()
+            if spec.type == 'int':
+                return fake.random_int(int(low), int(high))
+            if spec.type == 'money':
+                return fake.random_int(ceil(Decimal(str(low)) * 100), floor(Decimal(str(high)) * 100)) / 100
+            return fake.random.uniform(low, high)
+        if spec.start is not None or spec.end is not None:
+            low, high = spec.date_bounds()
+            if spec.type == 'date':
+                return fake.date_between_dates(date_start=low, date_end=high).isoformat()
+            return fake.date_time_between_dates(datetime_start=low, datetime_end=high).isoformat()
+        return fake.random_element(spec.values) if spec.type == 'enum' else generators[spec.type]()
+
     data = {name: [{} for _ in range(resource.count)] for name, resource in schema.resources.items()}
     pending = []
     for name, resource in schema.resources.items():
@@ -29,7 +46,7 @@ def generate(schema: SchemaInput) -> dict[str, list[dict]]:
                 pending.append((name, field, spec.target))
                 continue
             for row in data[name]:
-                row[field] = fake.random_element(spec.values) if spec.type == "enum" else generators[spec.type]()
+                row[field] = value(spec)
     while pending:
         remaining = []
         for name, field, target in pending:

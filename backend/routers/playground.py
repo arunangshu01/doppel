@@ -3,7 +3,7 @@ import secrets
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from model.schema import SchemaInput
-from source.templates import RETAIL
+from source.templates import TEMPLATES
 
 router = APIRouter(tags=["Playground"])
 
@@ -21,9 +21,16 @@ def health():
     return {"status": "ok"}
 
 
-@router.get("/templates/retail")
-def retail_template():
-    return RETAIL
+@router.get("/templates")
+def templates():
+    return {"templates": [{"id": name, "resources": list(schema["resources"])} for name, schema in TEMPLATES.items()]}
+
+
+@router.get("/templates/{name}")
+def get_template(name: str):
+    if name not in TEMPLATES:
+        raise HTTPException(404, "Unknown starter template")
+    return TEMPLATES[name]
 
 
 @router.get("/schema")

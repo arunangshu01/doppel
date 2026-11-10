@@ -50,6 +50,7 @@ class PlaygroundStore:
         self.max_sessions = 20
         self.max_cells = 200000
         self.max_generations = 12
+        self.simulation_requests = 0
 
     def prune(self):
         now = time.monotonic()
@@ -71,6 +72,8 @@ class PlaygroundStore:
         self.generations.append(now)
 
     async def save(self, schema, session_id=None, admin=False):
+        if self.lock.locked():
+            raise HTTPException(429, 'Generation is already in progress. Retry shortly.', headers={'Retry-After': '1'})
         async with self.lock:
             self.prune()
             previous = self.get(session_id) if session_id else None
@@ -111,4 +114,4 @@ class DatasetGateway:
                 await JSONResponse({"detail": exc.detail}, status_code=exc.status_code)(scope, receive, send)
                 return
             scope = {**scope, "root_path": scope.get("root_path", "") + "/" + session_id}
-        await target.app(scope, receive, send)
+        await target.app({**scope, 'doppel_store': self.store}, receive, send)

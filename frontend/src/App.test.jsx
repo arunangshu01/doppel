@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
+import axe from 'axe-core';
 
 const schema = { seed: 42, resources: { users: { count: 2, fields: { id: 'uuid', name: 'person' } } } };
 const manifest = { id: 'session-a', base_path: '/doppel/api/playgrounds/session-a', expires_at: '2030-01-01T00:00:00Z', resources: [{ name: 'users', count: 2, endpoint: '/doppel/api/playgrounds/session-a/users' }] };
@@ -18,6 +19,152 @@ beforeEach(() => {
 });
 
 afterEach(() => jest.restoreAllMocks());
+
+test('keeps the anonymous fairness identifier in memory and forwards it on API calls', async () => {
+  const identifier = 'anonymous-fair-use-test';
+  global.fetch.mockImplementation((url) => {
+    if (url === '/doppel/api/demo') return Promise.resolve({ ok: true, headers: { get: (name) => name === 'X-Doppel-Client' ? identifier : null }, json: async () => demo });
+    return response({ data: [{ id: '123', name: 'Ada Lovelace' }], total: 2 });
+  });
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/users?'), expect.objectContaining({ headers: { 'X-Doppel-Client': identifier } }));
+  expect(Object.values(localStorage)).not.toContain(identifier);
+});
+
+test('shows a real rate-limit retry delay without automatically retrying', async () => {
+  global.fetch.mockImplementation((url) => url === '/doppel/api/demo' ? response(demo) : Promise.resolve({ ok: false, status: 429, headers: { get: (name) => name === 'Retry-After' ? '60' : null }, json: async () => ({ detail: 'Fair-use request limit reached.' }) }));
+  render(<App />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Try again in 60 seconds.');
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+test('does not mistake a simulated 429 for an actual fair-use limit', async () => {
+  global.fetch.mockImplementation((url) => url === '/doppel/api/demo' ? response(demo) : Promise.resolve({ ok: false, status: 429, headers: { get: (name) => name === 'Retry-After' ? '60' : null }, json: async () => ({ detail: 'Simulated HTTP 429 response', simulated: true }) }));
+  render(<App />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Simulated HTTP 429 response');
+  expect(screen.getByRole('alert')).not.toHaveTextContent('Try again');
+});
+
+test('passes structural accessibility checks for the loaded workbench', async () => {
+  const { container } = render(<App />);
+  await screen.findByText('Ada Lovelace');
+  const result = await axe.run(container, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'best-practice'] }, rules: { 'color-contrast': { enabled: false } } });
+  expect(result.violations.map(({ id, nodes }) => ({ id, targets: nodes.map(({ target }) => target) }))).toEqual([]);
+});
+
+test('provides quick navigation between the editor and response explorer', async () => {
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  expect(screen.getByRole('link', { name: 'Skip to playground' })).toHaveAttribute('href', '#playground');
+  expect(screen.getByRole('main')).toHaveAttribute('tabindex', '-1');
+  expect(screen.getByRole('link', { name: 'Jump to schema editor' })).toHaveAttribute('href', '#schema-editor');
+  expect(screen.getByRole('link', { name: 'Jump to response explorer' })).toHaveAttribute('href', '#response-explorer');
+  expect(screen.getByLabelText('Schema JSON').closest('form')).toHaveAttribute('id', 'schema-editor');
+  expect(screen.getByRole('region', { name: 'API preview' })).toHaveAttribute('id', 'response-explorer');
+});
+
+test('makes wide table and JSON response containers keyboard focusable', async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  const table = screen.getByRole('region', { name: 'users response table' });
+  expect(table).toHaveAttribute('tabindex', '0');
+  table.focus();
+  expect(table).toHaveFocus();
+  await user.click(screen.getByRole('tab', { name: 'JSON' }));
+  const json = screen.getByLabelText('JSON response');
+  expect(json).toHaveAttribute('tabindex', '0');
+  json.focus();
+  expect(json).toHaveFocus();
+});
+
+test('shows approved creator attribution and clickable public contact links', async () => {
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  expect(screen.getByText('Arunangshu Pramanik')).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'GitHub' })).toHaveAttribute('href', 'https://github.com/arunangshu01');
+  expect(screen.getByRole('link', { name: 'Email Arunangshu Pramanik' })).toHaveAttribute('href', 'mailto:arunangshu01@gmail.com');
+  expect(screen.getByRole('link', { name: 'GitHub' }).querySelector('svg')).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Email Arunangshu Pramanik' }).querySelector('svg')).toBeInTheDocument();
+  expect(document.querySelector('a[href^="tel:"]')).not.toBeInTheDocument();
+  expect(screen.queryByText('arunangshu01@gmail.com')).not.toBeInTheDocument();
+});
+
+test('applies pagination, filtering and sorting and copies the applied query', async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  await user.clear(screen.getByLabelText('Page'));
+  await user.type(screen.getByLabelText('Page'), '2');
+  await user.selectOptions(screen.getByLabelText('Page size'), '10');
+  await user.type(screen.getByLabelText('Sort field'), 'name');
+  await user.selectOptions(screen.getByLabelText('Sort order'), 'desc');
+  await user.type(screen.getByLabelText('Filter field'), 'name');
+  await user.type(screen.getByLabelText('Filter value'), 'Ada Lovelace');
+  await user.click(screen.getByRole('button', { name: 'Apply query' }));
+  await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('http://localhost/doppel/api/users?limit=10&page=2&sort=name&order=desc&name=Ada+Lovelace', expect.anything()));
+  await user.click(screen.getByRole('button', { name: 'Copy cURL' }));
+  expect(await navigator.clipboard.readText()).toContain('limit=10&page=2&sort=name&order=desc&name=Ada+Lovelace');
+});
+
+test('simulates errors without treating a simulated 404 as an expired playground', async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  global.fetch.mockImplementationOnce(() => response(manifest));
+  await user.click(screen.getByRole('button', { name: 'Generate API' }));
+  await screen.findByText('Ada Lovelace');
+  await user.click(screen.getByText('Simulate a response'));
+  await user.selectOptions(screen.getByLabelText('HTTP status'), '404');
+  global.fetch.mockImplementationOnce(() => Promise.resolve({ ok: false, status: 404, json: async () => ({ detail: 'Simulated HTTP 404 response', simulated: true }) }));
+  await user.click(screen.getByRole('button', { name: 'Apply query' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Simulated HTTP 404');
+  expect(screen.getByText('HTTP 404')).toBeInTheDocument();
+  global.fetch.mockImplementationOnce(() => response(manifest));
+  await user.click(screen.getByRole('button', { name: 'Generate API' }));
+  expect(global.fetch).toHaveBeenLastCalledWith(expect.stringContaining('/users?limit=5'), expect.anything());
+  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/playgrounds/session-a', expect.objectContaining({ method: 'PUT' }));
+});
+
+test('simulates empty results and resets the request controls', async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  await user.click(screen.getByText('Simulate a response'));
+  await user.click(screen.getByLabelText('Empty result'));
+  global.fetch.mockImplementationOnce(() => response({ data: [], total: 0 }));
+  await user.click(screen.getByRole('button', { name: 'Apply query' }));
+  expect(await screen.findByText(/No rows returned/)).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Reset query' }));
+  await screen.findByText('Ada Lovelace');
+  expect(screen.getByLabelText('Empty result')).not.toBeChecked();
+});
+
+test('imports a saved schema as a draft without publishing', async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  const imported = { ...schema, seed: 99 };
+  await user.upload(screen.getByLabelText('Import schema'), new File([JSON.stringify(imported)], 'saved.json', { type: 'application/json' }));
+  await waitFor(() => expect(screen.getByLabelText('Schema JSON')).toHaveValue(JSON.stringify(imported, null, 2)));
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+  expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
+  expect(screen.getByText('Unpublished changes')).toBeInTheDocument();
+});
+
+test('rejects malformed and oversized imports without replacing the editor', async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  const original = screen.getByLabelText('Schema JSON').value;
+  await user.upload(screen.getByLabelText('Import schema'), new File(['not json'], 'broken.json', { type: 'application/json' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('valid JSON');
+  expect(screen.getByLabelText('Schema JSON')).toHaveValue(original);
+  await user.upload(screen.getByLabelText('Import schema'), new File(['x'.repeat(131073)], 'large.json', { type: 'application/json' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('128 KiB');
+  expect(screen.getByLabelText('Schema JSON')).toHaveValue(original);
+});
 
 test('persists an explicit dark theme and restores it on remount', async () => {
   const user = userEvent.setup();
@@ -92,7 +239,7 @@ test('loads schema, publishes it, and previews live endpoints', async () => {
   global.fetch.mockImplementationOnce(() => response(manifest));
   await user.click(screen.getByRole('button', { name: 'Generate API' }));
   expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/playgrounds/session-a/users');
+  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/playgrounds/session-a/users?limit=5');
   expect(global.fetch).toHaveBeenCalledWith('/doppel/api/playgrounds', expect.objectContaining({ method: 'POST', body: JSON.stringify(schema) }));
 });
 
@@ -133,7 +280,7 @@ test('shows backend validation errors', async () => {
 test('starts on the public demo without generating data', async () => {
   render(<App />);
   await screen.findByText('Ada Lovelace');
-  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/users');
+  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/users?limit=5');
   expect(global.fetch.mock.calls.every(([, options]) => !options?.method)).toBe(true);
 });
 
@@ -144,9 +291,9 @@ test('returns to the demo without changing a personal playground', async () => {
   global.fetch.mockImplementationOnce(() => response(manifest));
   await user.click(screen.getByRole('button', { name: 'Generate API' }));
   await user.click(screen.getByRole('button', { name: 'Public demo' }));
-  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/users');
+  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/users?limit=5');
   await user.click(screen.getByRole('button', { name: 'My playground' }));
-  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/playgrounds/session-a/users');
+  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/playgrounds/session-a/users?limit=5');
 });
 
 test('admin publication requires confirmation and clears the token', async () => {
@@ -225,6 +372,28 @@ test('reports a connection failure', async () => {
   global.fetch.mockRejectedValue(new Error('Backend unavailable'));
   render(<App />);
   expect(await screen.findByRole('alert')).toHaveTextContent('Backend unavailable');
+});
+
+test('changes the draft data locale without regenerating the live API', async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  await user.selectOptions(screen.getByLabelText('Data locale'), 'en_IN');
+  expect(JSON.parse(screen.getByLabelText('Schema JSON').value).locale).toBe('en_IN');
+  expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+});
+
+test('loads the selected starter template without publishing', async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText('Ada Lovelace');
+  await user.selectOptions(screen.getByLabelText('Starter template'), 'blog');
+  global.fetch.mockImplementationOnce(() => response({ ...schema, seed: 7 }));
+  await user.click(screen.getByRole('button', { name: 'Load blog template' }));
+  await waitFor(() => expect(screen.getByLabelText('Schema JSON')).toHaveValue(JSON.stringify({ ...schema, seed: 7 }, null, 2)));
+  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/templates/blog', undefined);
+  expect(global.fetch.mock.calls.every(([, options]) => !options?.method)).toBe(true);
 });
 
 test('loads the retail template into the editor', async () => {
