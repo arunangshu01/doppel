@@ -27,7 +27,7 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: production
     permissions:
@@ -47,7 +47,7 @@ jobs:
             ap-portfolio-241026|mahakal-ai-230925) echo '::error::Use a separate doppel project.'; exit 1 ;;
           esac
           test "$GCP_DEPLOY_SA" = "doppel-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.COMMIT }}
           persist-credentials: false
@@ -59,12 +59,12 @@ jobs:
           HEAD_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
           test "$COMMIT" = "$HEAD_SHA" || { echo 'Refusing to deploy an outdated main commit.'; exit 1; }
           node -e "const s=require('./firebase.json').hosting.site; if (!/^[a-z0-9][a-z0-9-]+$/.test(s)) throw Error('Set the confirmed doppel Hosting site ID in firebase.json');"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
           cache: npm
@@ -118,6 +118,7 @@ jobs:
             --concurrency 20 \
             --min-instances 0 \
             --max-instances 1 \
+            --max 1 \
             --timeout 60 \
             --env-vars-file deploy/cloud-run.env.yaml \
             --set-secrets 'ADMIN_TOKEN=doppel-admin-token:latest' \
