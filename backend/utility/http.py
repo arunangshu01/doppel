@@ -26,14 +26,17 @@ class AbuseLimits:
 
     def identity(self, scope):
         token = Headers(scope=scope).get('x-doppel-client', '')
+        fresh = not token
         if re.fullmatch(r'[A-Za-z0-9_-]{24}\.[0-9]{1,12}\.[a-f0-9]{64}', token):
             payload, signature = token.rsplit('.', 1)
-            issued = int(payload.split('.')[1])
-            expected = hmac.digest(self.key, payload.encode(), 'sha256').hex()
-            if 0 <= time.time() - issued <= 1800 and hmac.compare_digest(signature, expected):
-                return payload.split('.')[0], None
-        payload = f'{secrets.token_urlsafe(18)}.{int(time.time())}'
-        return 'anonymous', f'{payload}.{hmac.digest(self.key, payload.encode(), "sha256").hex()}'
+            client, issued = payload.split('.')
+            if hmac.compare_digest(signature, hmac.digest(self.key, payload.encode(), 'sha256').hex()):
+                if 0 <= time.time() - int(issued) <= 1800:
+                    return client, None
+                fresh = True
+        client = secrets.token_urlsafe(18)
+        payload = f'{client}.{int(time.time())}'
+        return client if fresh else 'anonymous', f'{payload}.{hmac.digest(self.key, payload.encode(), "sha256").hex()}'
 
     def take(self, window, limit, now):
         while window and window[0] <= now - 60:

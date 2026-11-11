@@ -4,7 +4,7 @@ from decimal import Decimal
 from math import ceil, floor
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_serializer, model_validator
 
 
 TYPES = {"uuid", "person", "email", "date", "datetime", "money", "int", "float", "bool", "enum", "sentence", "word", "ref"}
@@ -12,6 +12,8 @@ NAME = r"[a-z][a-z0-9_]{0,47}"
 REFERENCE = re.compile(rf"ref\(({NAME})\.({NAME})\)")
 RESERVED = {"api", "docs", "redoc", "openapi", "health", "schema", "templates", "playgrounds", "demo"}
 QUERY_FIELDS = {"page", "limit", "sort", "order"}
+NUMERIC_SPAN = 10000
+DATE_LIMITS = {"date": (date(1900, 1, 1), date(2100, 12, 31)), "datetime": (datetime(1900, 1, 1), datetime(2100, 12, 31, 23, 59, 59))}
 
 
 class FieldSpec(BaseModel):
@@ -25,11 +27,33 @@ class FieldSpec(BaseModel):
     end: str | None = Field(default=None, min_length=1, max_length=32)
 
     def numeric_bounds(self):
-        return self.min if self.min is not None else 0, self.max if self.max is not None else 10000
+        low, high = self.min, self.max
+        if low is None:
+            low = 0 if high is None or high >= 0 else high - NUMERIC_SPAN
+        if high is None:
+            high = NUMERIC_SPAN if low <= NUMERIC_SPAN else low + NUMERIC_SPAN
+        return low, high
+
+    def parse_date(self, value):
+        return (date.fromisoformat if self.type == 'date' else datetime.fromisoformat)(value)
 
     def date_bounds(self):
-        parse = date.fromisoformat if self.type == 'date' else datetime.fromisoformat
-        return parse(self.start or '2020-01-01'), parse(self.end or '2025-01-01')
+        default_low, default_high = self.parse_date('2020-01-01'), self.parse_date('2025-01-01')
+        floor_, ceiling = DATE_LIMITS[self.type]
+        low = self.parse_date(self.start) if self.start is not None else None
+        high = self.parse_date(self.end) if self.end is not None else None
+        if low is None:
+            low = default_low if high is None or high >= default_low else max(high - (default_high - default_low), floor_)
+        if high is None:
+            high = default_high if low <= default_high else min(low + (default_high - default_low), ceiling)
+        return low, high
+
+    @model_serializer(mode="wrap")
+    def compact(self, handler):
+        data = {key: value for key, value in handler(self).items() if key == "type" or value not in (None, [])}
+        if data.keys() == {"type"}:
+            return self.type
+        return f"ref({self.target})" if data.keys() == {"type", "target"} and self.type == "ref" else data
 
     @model_validator(mode="after")
     def validate_type(self):
@@ -37,8 +61,12 @@ class FieldSpec(BaseModel):
             raise ValueError(f"Unknown type: {self.type}")
         if self.type == "enum" and not self.values:
             raise ValueError("enum requires non-empty values")
+        if self.values and self.type != "enum":
+            raise ValueError("values require an enum field")
         if self.type == "ref" and (not self.target or not re.fullmatch(rf"{NAME}\.{NAME}", self.target)):
             raise ValueError("ref requires a resource.field target")
+        if self.target is not None and self.type != "ref":
+            raise ValueError("target requires a ref field")
         if self.min is not None or self.max is not None:
             if self.type not in {'int', 'float', 'money'}:
                 raise ValueError('min/max require an int, float, or money field')
@@ -52,32 +80,40 @@ class FieldSpec(BaseModel):
         if self.start is not None or self.end is not None:
             if self.type not in {'date', 'datetime'}:
                 raise ValueError('start/end require a date or datetime field')
-            low, high = self.date_bounds()
-            if self.type == 'datetime' and (low.tzinfo is not None or high.tzinfo is not None or low.microsecond or high.microsecond):
+            given = [self.parse_date(value) for value in (self.start, self.end) if value is not None]
+            if self.type == 'datetime' and any(value.tzinfo is not None or value.microsecond for value in given):
                 raise ValueError('datetime bounds must use timezone-free ISO values at whole-second precision')
-            if low > high or low.year < 1900 or high.year > 2100:
+            if any(value.year < 1900 or value.year > 2100 for value in given):
+                raise ValueError('date bounds must be ordered and within 1900 through 2100')
+            low, high = self.date_bounds()
+            if low > high:
                 raise ValueError('date bounds must be ordered and within 1900 through 2100')
         return self
-
-
-def field_spec(value):
-    if isinstance(value, str):
-        match = REFERENCE.fullmatch(value)
-        return FieldSpec(type="ref", target=".".join(match.groups())) if match else FieldSpec(type=value)
-    return FieldSpec.model_validate(value)
 
 
 class Resource(BaseModel):
     model_config = ConfigDict(extra="forbid")
     count: int = Field(default=20, ge=1, le=1000, strict=True)
-    fields: dict[str, str | FieldSpec] = Field(min_length=1, max_length=50)
+    fields: dict[str, FieldSpec] = Field(min_length=1, max_length=50)
+
+    @field_validator("fields", mode="before")
+    @classmethod
+    def expand_shorthand(cls, fields):
+        if not isinstance(fields, dict):
+            return fields
+        expanded = {}
+        for name, spec in fields.items():
+            if isinstance(spec, str):
+                match = REFERENCE.fullmatch(spec)
+                spec = {"type": "ref", "target": ".".join(match.groups())} if match else {"type": spec}
+            expanded[name] = spec
+        return expanded
 
     @model_validator(mode="after")
     def validate_fields(self):
-        for name, spec in self.fields.items():
+        for name in self.fields:
             if not re.fullmatch(NAME, name) or name in QUERY_FIELDS:
                 raise ValueError(f"Invalid or reserved field name: {name}")
-            self.fields[name] = field_spec(spec)
         if "id" not in self.fields or self.fields["id"].type != "uuid":
             raise ValueError("Every resource requires an id field of type uuid")
         return self

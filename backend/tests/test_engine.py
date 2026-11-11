@@ -82,6 +82,61 @@ def test_equal_bounds_and_exact_cent_values():
         assert row['day'] == '2000-02-29' and row['instant'] == '2024-01-01T12:00:00'
 
 
+@pytest.mark.parametrize('field, low, high', [
+    ({'type': 'int', 'min': 20000}, 20000, 30000),
+    ({'type': 'int', 'max': -50}, -10050, -50),
+    ({'type': 'money', 'max': 5}, 0, 5),
+    ({'type': 'float', 'min': 5}, 5, 10000),
+    ({'type': 'date', 'start': '2030-06-01'}, '2030-06-01', '2035-06-02'),
+    ({'type': 'date', 'end': '1999-01-01'}, '1993-12-31', '1999-01-01'),
+    ({'type': 'date', 'start': '2099-01-01'}, '2099-01-01', '2100-12-31'),
+    ({'type': 'datetime', 'start': '2100-12-31T12:00:00'}, '2100-12-31T12:00:00', '2100-12-31T23:59:59'),
+])
+def test_one_sided_bounds_extend_instead_of_failing(field, low, high):
+    schema = SchemaInput.model_validate({'resources': {'items': {'count': 25, 'fields': {'id': 'uuid', 'value': field}}}})
+    for row in generate(schema)['items']:
+        assert low <= row['value'] <= high
+
+
+def test_bounded_floats_are_rounded_within_bounds():
+    schema = SchemaInput.model_validate({'resources': {'items': {'count': 50, 'fields': {
+        'id': 'uuid', 'score': {'type': 'float', 'min': 0.00001, 'max': 0.00009}
+    }}}})
+    for row in generate(schema)['items']:
+        assert 0.00001 <= row['score'] <= 0.00009 and row['score'] == round(row['score'], 5)
+    schema = SchemaInput.model_validate({'resources': {'items': {'count': 50, 'fields': {
+        'id': 'uuid', 'score': {'type': 'float', 'min': -2.5, 'max': 2.5}
+    }}}})
+    assert all(row['score'] == round(row['score'], 4) for row in generate(schema)['items'])
+
+
+@pytest.mark.parametrize('field', [
+    {'type': 'word', 'values': ['a']}, {'type': 'uuid', 'target': 'users.id'},
+    {'type': 'datetime', 'end': '0001-01-01T00:00:00'},
+])
+def test_inapplicable_or_unbounded_options_rejected(field):
+    with pytest.raises(ValidationError):
+        SchemaInput.model_validate({'resources': {'items': {'fields': {'id': 'uuid', 'value': field}}}})
+
+
+def test_schema_dump_is_compact_and_round_trips():
+    schema = SchemaInput.model_validate(RETAIL)
+    dumped = schema.model_dump()
+    fields = dumped['resources']['transactions']['fields']
+    assert fields['id'] == 'uuid' and fields['store_id'] == 'ref(stores.id)'
+    assert fields['status'] == {'type': 'enum', 'values': ['completed', 'pending', 'refunded']}
+    assert SchemaInput.model_validate(dumped) == schema
+    expanded = {'resources': {'items': {'fields': {'id': {'type': 'uuid', 'values': [], 'target': None, 'min': None}}}}}
+    assert SchemaInput.model_validate(expanded).model_dump()['resources']['items']['fields'] == {'id': 'uuid'}
+
+
+def test_field_errors_are_not_mixed_with_shorthand_errors():
+    with pytest.raises(ValidationError) as caught:
+        SchemaInput.model_validate({'resources': {'items': {'fields': {'id': 'uuid', 'age': {'type': 'int', 'min': 2, 'max': 1}}}}})
+    messages = [error['msg'] for error in caught.value.errors()]
+    assert messages == ['Value error, min must not exceed max']
+
+
 def test_unknown_locale_rejected():
     with pytest.raises(ValidationError):
         SchemaInput.model_validate({'locale': 'missing_locale', 'resources': {'items': {'fields': {'id': 'uuid'}}}})
