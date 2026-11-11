@@ -337,6 +337,29 @@ def test_slow_upload_is_bounded():
     assert (b'cache-control', b'no-store') in messages[0]['headers']
 
 
+def test_legacy_unversioned_prefix_is_served_with_deprecation(client):
+    legacy = P.removesuffix('/v1')
+    health = client.get(f'{legacy}/health')
+    assert health.status_code == 200 and health.json() == {'status': 'ok'}
+    assert health.headers['deprecation'] == 'true'
+    assert health.headers['link'] == f'<{P}/health>; rel="successor-version"'
+    assert health.headers['cache-control'] == 'no-store'
+    assert client.get(f'{legacy}/stores', params={'limit': 2}).json()['limit'] == 2
+    created = client.post(f'{legacy}/playgrounds', json=SCHEMA)
+    assert created.status_code == 201 and created.json()['base_path'].startswith(f'{P}/playgrounds/')
+    session = created.json()['id']
+    assert client.get(f'{legacy}/playgrounds/{session}/users').status_code == 200
+    assert client.get(f'{P}/playgrounds/{session}/users').status_code == 200
+    assert 'deprecation' not in client.get(f'{P}/health').headers
+    assert client.get(f'{legacy}v2/health').status_code == 404
+
+
+def test_legacy_prefix_shares_versioned_rate_limits(client):
+    client.app.state.abuse.global_limits['read'] = 1
+    assert client.get(f"{P.removesuffix('/v1')}/stores").status_code == 200
+    assert client.get(f'{P}/stores').status_code == 429
+
+
 def test_fair_use_headers_are_available_to_allowed_browser_clients(client):
     response = client.get(f'{P}/demo', headers={'Origin': 'http://localhost:5173'})
     assert response.headers['access-control-allow-origin'] == 'http://localhost:5173'
