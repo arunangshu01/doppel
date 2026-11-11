@@ -4,15 +4,15 @@ import App from './App';
 import axe from 'axe-core';
 
 const schema = { seed: 42, resources: { users: { count: 2, fields: { id: 'uuid', name: 'person' } } } };
-const manifest = { id: 'session-a', base_path: '/doppel/api/playgrounds/session-a', expires_at: '2030-01-01T00:00:00Z', resources: [{ name: 'users', count: 2, endpoint: '/doppel/api/playgrounds/session-a/users' }] };
-const demo = { base_path: '/doppel/api', schema, resources: [{ name: 'users', count: 2, endpoint: '/doppel/api/users' }] };
+const manifest = { id: 'session-a', base_path: '/doppel/api/v1/playgrounds/session-a', expires_at: '2030-01-01T00:00:00Z', resources: [{ name: 'users', count: 2, endpoint: '/doppel/api/v1/playgrounds/session-a/users' }] };
+const demo = { base_path: '/doppel/api/v1', schema, resources: [{ name: 'users', count: 2, endpoint: '/doppel/api/v1/users' }] };
 const response = (body, ok = true) => Promise.resolve({ ok, json: async () => body });
 
 beforeEach(() => {
   localStorage.clear();
   global.fetch = jest.fn((url) => {
-    if (url === '/doppel/api/demo') return response(demo);
-    if (url === '/doppel/api/templates/retail') return response(schema);
+    if (url === '/doppel/api/v1/demo') return response(demo);
+    if (url === '/doppel/api/v1/templates/retail') return response(schema);
     if (url.includes('/users')) return response({ data: [{ id: '123', name: 'Ada Lovelace' }], total: 2 });
     throw new Error(`Unexpected URL: ${url}`);
   });
@@ -23,7 +23,7 @@ afterEach(() => jest.restoreAllMocks());
 test('keeps the anonymous fairness identifier in memory and forwards it on API calls', async () => {
   const identifier = 'anonymous-fair-use-test';
   global.fetch.mockImplementation((url) => {
-    if (url === '/doppel/api/demo') return Promise.resolve({ ok: true, headers: { get: (name) => name === 'X-Doppel-Client' ? identifier : null }, json: async () => demo });
+    if (url === '/doppel/api/v1/demo') return Promise.resolve({ ok: true, headers: { get: (name) => name === 'X-Doppel-Client' ? identifier : null }, json: async () => demo });
     return response({ data: [{ id: '123', name: 'Ada Lovelace' }], total: 2 });
   });
   render(<App />);
@@ -33,14 +33,14 @@ test('keeps the anonymous fairness identifier in memory and forwards it on API c
 });
 
 test('shows a real rate-limit retry delay without automatically retrying', async () => {
-  global.fetch.mockImplementation((url) => url === '/doppel/api/demo' ? response(demo) : Promise.resolve({ ok: false, status: 429, headers: { get: (name) => name === 'Retry-After' ? '60' : null }, json: async () => ({ detail: 'Fair-use request limit reached.' }) }));
+  global.fetch.mockImplementation((url) => url === '/doppel/api/v1/demo' ? response(demo) : Promise.resolve({ ok: false, status: 429, headers: { get: (name) => name === 'Retry-After' ? '60' : null }, json: async () => ({ detail: 'Fair-use request limit reached.' }) }));
   render(<App />);
   expect(await screen.findByRole('alert')).toHaveTextContent('Try again in 60 seconds.');
   expect(fetch).toHaveBeenCalledTimes(2);
 });
 
 test('does not mistake a simulated 429 for an actual fair-use limit', async () => {
-  global.fetch.mockImplementation((url) => url === '/doppel/api/demo' ? response(demo) : Promise.resolve({ ok: false, status: 429, headers: { get: (name) => name === 'Retry-After' ? '60' : null }, json: async () => ({ detail: 'Simulated HTTP 429 response', simulated: true }) }));
+  global.fetch.mockImplementation((url) => url === '/doppel/api/v1/demo' ? response(demo) : Promise.resolve({ ok: false, status: 429, headers: { get: (name) => name === 'Retry-After' ? '60' : null }, json: async () => ({ detail: 'Simulated HTTP 429 response', simulated: true }) }));
   render(<App />);
   expect(await screen.findByRole('alert')).toHaveTextContent('Simulated HTTP 429 response');
   expect(screen.getByRole('alert')).not.toHaveTextContent('Try again');
@@ -109,7 +109,7 @@ test('applies pagination, filtering and sorting and copies the applied query', a
   await user.type(screen.getByLabelText('Filter field'), 'name');
   await user.type(screen.getByLabelText('Filter value'), 'Ada Lovelace');
   await user.click(screen.getByRole('button', { name: 'Apply query' }));
-  await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('http://localhost/doppel/api/users?limit=10&page=2&sort=name&order=desc&name=Ada+Lovelace', expect.anything()));
+  await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('http://localhost/doppel/api/v1/users?limit=10&page=2&sort=name&order=desc&name=Ada+Lovelace', expect.anything()));
   await user.click(screen.getByRole('button', { name: 'Copy cURL' }));
   expect(await navigator.clipboard.readText()).toContain('limit=10&page=2&sort=name&order=desc&name=Ada+Lovelace');
 });
@@ -130,7 +130,7 @@ test('simulates errors without treating a simulated 404 as an expired playground
   global.fetch.mockImplementationOnce(() => response(manifest));
   await user.click(screen.getByRole('button', { name: 'Generate API' }));
   expect(global.fetch).toHaveBeenLastCalledWith(expect.stringContaining('/users?limit=5'), expect.anything());
-  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/playgrounds/session-a', expect.objectContaining({ method: 'PUT' }));
+  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/v1/playgrounds/session-a', expect.objectContaining({ method: 'PUT' }));
 });
 
 test('simulates empty results and resets the request controls', async () => {
@@ -234,7 +234,7 @@ test('switches to JSON and copies a usable cURL request', async () => {
   expect(screen.getByRole('tab', { name: 'JSON' })).toHaveFocus();
   expect(screen.getByLabelText('JSON response')).toHaveTextContent('Ada Lovelace');
   await user.click(screen.getByRole('button', { name: 'Copy cURL' }));
-  expect(await navigator.clipboard.readText()).toBe("curl 'http://localhost/doppel/api/playgrounds/session-a/users?limit=5'");
+  expect(await navigator.clipboard.readText()).toBe("curl 'http://localhost/doppel/api/v1/playgrounds/session-a/users?limit=5'");
   expect(screen.getByRole('status')).toHaveTextContent('cURL copied');
 });
 
@@ -245,8 +245,8 @@ test('loads schema, publishes it, and previews live endpoints', async () => {
   global.fetch.mockImplementationOnce(() => response(manifest));
   await user.click(screen.getByRole('button', { name: 'Generate API' }));
   expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/playgrounds/session-a/users?limit=5');
-  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/playgrounds', expect.objectContaining({ method: 'POST', body: JSON.stringify(schema) }));
+  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/v1/playgrounds/session-a/users?limit=5');
+  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/v1/playgrounds', expect.objectContaining({ method: 'POST', body: JSON.stringify(schema) }));
 });
 
 test('marks edits as unpublished while preserving the live response', async () => {
@@ -286,7 +286,7 @@ test('shows backend validation errors', async () => {
 test('starts on the public demo without generating data', async () => {
   render(<App />);
   await screen.findByText('Ada Lovelace');
-  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/users?limit=5');
+  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/v1/users?limit=5');
   expect(global.fetch.mock.calls.every(([, options]) => !options?.method)).toBe(true);
 });
 
@@ -297,9 +297,9 @@ test('returns to the demo without changing a personal playground', async () => {
   global.fetch.mockImplementationOnce(() => response(manifest));
   await user.click(screen.getByRole('button', { name: 'Generate API' }));
   await user.click(screen.getByRole('button', { name: 'Public demo' }));
-  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/users?limit=5');
+  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/v1/users?limit=5');
   await user.click(screen.getByRole('button', { name: 'My playground' }));
-  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/playgrounds/session-a/users?limit=5');
+  expect(screen.getByRole('link', { name: 'GET /users' })).toHaveAttribute('href', 'http://localhost/doppel/api/v1/playgrounds/session-a/users?limit=5');
 });
 
 test('admin publication requires confirmation and clears the token', async () => {
@@ -312,7 +312,7 @@ test('admin publication requires confirmation and clears the token', async () =>
   global.fetch.mockImplementationOnce(() => response(demo));
   await user.click(screen.getByRole('button', { name: 'Publish shared demo' }));
   expect(window.confirm).toHaveBeenCalled();
-  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/schema', expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-ui-token' }) }));
+  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/v1/schema', expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-ui-token' }) }));
   expect(screen.getByLabelText('Admin token')).toHaveValue('');
   expect(JSON.stringify(localStorage)).not.toContain('test-ui-token');
 });
@@ -325,7 +325,7 @@ test('updates a visitor playground without changing its URL', async () => {
   await user.click(screen.getByRole('button', { name: 'Generate API' }));
   global.fetch.mockImplementationOnce(() => response(manifest));
   await user.click(screen.getByRole('button', { name: 'Generate API' }));
-  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/playgrounds/session-a', expect.objectContaining({ method: 'PUT' }));
+  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/v1/playgrounds/session-a', expect.objectContaining({ method: 'PUT' }));
 });
 
 test('does not publish when admin confirmation is cancelled', async () => {
@@ -365,7 +365,7 @@ test('recovers an expired session by creating a new one on the next generation',
   expect(await screen.findByRole('alert')).toHaveTextContent('Playground expired');
   global.fetch.mockImplementationOnce(() => response(manifest));
   await user.click(screen.getByRole('button', { name: 'Generate API' }));
-  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/playgrounds', expect.objectContaining({ method: 'POST' }));
+  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/v1/playgrounds', expect.objectContaining({ method: 'POST' }));
 });
 
 test('reports a non-JSON response instead of exposing a JSON parser error', async () => {
@@ -398,7 +398,7 @@ test('loads the selected starter template without publishing', async () => {
   global.fetch.mockImplementationOnce(() => response({ ...schema, seed: 7 }));
   await user.click(screen.getByRole('button', { name: 'Load blog template' }));
   await waitFor(() => expect(screen.getByLabelText('Schema JSON')).toHaveValue(JSON.stringify({ ...schema, seed: 7 }, null, 2)));
-  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/templates/blog', undefined);
+  expect(global.fetch).toHaveBeenCalledWith('/doppel/api/v1/templates/blog', undefined);
   expect(global.fetch.mock.calls.every(([, options]) => !options?.method)).toBe(true);
 });
 

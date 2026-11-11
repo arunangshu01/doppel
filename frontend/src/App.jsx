@@ -46,7 +46,7 @@ function schemaStats(editor) {
   }
 }
 
-export default function App({ apiBase = '/doppel/api' }) {
+export default function App({ apiBase = '/doppel/api/v1' }) {
   const [editor, setEditor] = useState('');
   const [resources, setResources] = useState([]);
   const [active, setActive] = useState('');

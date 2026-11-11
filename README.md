@@ -77,7 +77,7 @@ npm ci
 npm run dev
 ```
 
-Open <http://localhost:5173>. The local API is at <http://127.0.0.1:8000/doppel/api>, with docs at <http://127.0.0.1:8000/doppel/api/docs> and OpenAPI at <http://127.0.0.1:8000/doppel/api/openapi.json>. These replace the original unprefixed endpoints. Vite proxies `/doppel/api` to the local backend, matching the production same-origin architecture.
+Open <http://localhost:5173>. The local API is at <http://127.0.0.1:8000/doppel/api/v1>, with docs at <http://127.0.0.1:8000/doppel/api/v1/docs> and OpenAPI at <http://127.0.0.1:8000/doppel/api/v1/openapi.json>. These replace the original unprefixed endpoints. Vite proxies `/doppel/api` (including `/doppel/api/v1`) to the local backend, matching the production same-origin architecture.
 
 ### Playground workflow
 
@@ -96,7 +96,7 @@ An expired playground returns 404. The UI clears the expired session when it rec
 The startup retail API can be queried from JavaScript:
 
 ```javascript
-const response = await fetch('/doppel/api/transactions?limit=10&sort=amount&order=desc');
+const response = await fetch('/doppel/api/v1/transactions?limit=10&sort=amount&order=desc');
 if (!response.ok) throw new Error(`Mock API returned ${response.status}`);
 const { data, total } = await response.json();
 console.log(data, total);
@@ -207,22 +207,22 @@ The server does not trust forwarded IP headers for rate limiting: Firebase Hosti
 
 ## REST API
 
-All API routes use `/doppel/api`. Firebase forwards this prefix unchanged to Cloud Run.
+All API routes use the versioned prefix `/doppel/api/v1`; the earlier unversioned `/doppel/api/...` routes are deprecated but still served by an internal rewrite to `/doppel/api/v1/...` (same handlers, rate limits, and headers, plus `Deprecation: true` and a `Link: rel="successor-version"` header) so existing links, open browser tabs, and the uptime check keep working during the transition. The alias will be removed in a later release. Firebase forwards the whole `/doppel/api/**` namespace unchanged to Cloud Run, so future versions need no Hosting change.
 
 | Endpoint | Behavior |
 | --- | --- |
-| `GET /doppel/api/health` | `{"status":"ok"}` |
-| `GET /doppel/api/demo` | Shared demo manifest, base path, and schema |
-| `GET /doppel/api/schema` | Current shared demo schema |
-| `GET /doppel/api/templates` | Starter catalog with IDs and resource names |
-| `GET /doppel/api/templates/{name}` | Starter schema: `retail`, `saas`, `blog`, or `ecommerce`; unknown names return 404 |
-| `POST /doppel/api/playgrounds` | Create an isolated playground; returns 201 with `id`, `base_path`, `expires_at`, seed, and resource endpoints |
-| `GET /doppel/api/playgrounds/{id}` | Playground manifest |
-| `GET /doppel/api/playgrounds/{id}/schema` | Playground schema |
-| `PUT /doppel/api/playgrounds/{id}` | Replace only this playground, retaining its URL and original expiry |
-| `POST /doppel/api/schema` | Replace shared demo; requires `Authorization: Bearer <admin token>` |
+| `GET /doppel/api/v1/health` | `{"status":"ok"}` |
+| `GET /doppel/api/v1/demo` | Shared demo manifest, base path, and schema |
+| `GET /doppel/api/v1/schema` | Current shared demo schema |
+| `GET /doppel/api/v1/templates` | Starter catalog with IDs and resource names |
+| `GET /doppel/api/v1/templates/{name}` | Starter schema: `retail`, `saas`, `blog`, or `ecommerce`; unknown names return 404 |
+| `POST /doppel/api/v1/playgrounds` | Create an isolated playground; returns 201 with `id`, `base_path`, `expires_at`, seed, and resource endpoints |
+| `GET /doppel/api/v1/playgrounds/{id}` | Playground manifest |
+| `GET /doppel/api/v1/playgrounds/{id}/schema` | Playground schema |
+| `PUT /doppel/api/v1/playgrounds/{id}` | Replace only this playground, retaining its URL and original expiry |
+| `POST /doppel/api/v1/schema` | Replace shared demo; requires `Authorization: Bearer <admin token>` |
 
-At the shared base `/doppel/api` or a visitor base `/doppel/api/playgrounds/{id}`:
+At the shared base `/doppel/api/v1` or a visitor base `/doppel/api/v1/playgrounds/{id}`:
 
 - `GET /{resource}` returns `{"data":[...],"total":100,"page":1,"limit":20}`.
 - `GET /{resource}/{id}` returns a row or 404.
@@ -232,9 +232,9 @@ At the shared base `/doppel/api` or a visitor base `/doppel/api/playgrounds/{id}
 - `/docs`, `/redoc`, and `/openapi.json` describe that dataset's resource routes. The OpenAPI `servers` entry contains the dataset base path, and Swagger fetches its document under that prefix. These dataset documents do not list the control endpoints in the table above.
 
 ```bash
-curl http://127.0.0.1:8000/doppel/api/stores
-curl 'http://127.0.0.1:8000/doppel/api/transactions?page=2&limit=10&sort=amount&order=desc'
-curl 'http://127.0.0.1:8000/doppel/api/transactions?status=completed'
+curl http://127.0.0.1:8000/doppel/api/v1/stores
+curl 'http://127.0.0.1:8000/doppel/api/v1/transactions?page=2&limit=10&sort=amount&order=desc'
+curl 'http://127.0.0.1:8000/doppel/api/v1/transactions?status=completed'
 ```
 
 ### Response simulation
@@ -260,10 +260,10 @@ API responses use `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. 
 | `PORT` | `8000` locally, `8080` in Docker | Listening port |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Allowed cross-origin browser clients; same-origin Hosting needs no CORS grant |
 | `ADMIN_TOKEN` | Empty, admin publishing disabled | Backend-only publishing credential; Secret Manager in production |
-| `VITE_API_URL` | `/doppel/api` | Public frontend API base path, set at build time |
+| `VITE_API_URL` | `/doppel/api/v1` | Public frontend API base path, set at build time |
 | `API_PROXY_TARGET` | `http://127.0.0.1:8000` | Vite development proxy destination |
 
-Frontend variables belong in `frontend/.env` and must never contain secrets. Production builds explicitly set `VITE_API_URL=/doppel/api`. Do not configure it to localhost or a different Cloud Run origin in production. Local visitor generation needs no token; if testing admin publishing, enter a locally generated value in your ignored backend `.env` and type it into the admin panel, never into frontend variables.
+Frontend variables belong in `frontend/.env` and must never contain secrets. Production builds explicitly set `VITE_API_URL=/doppel/api/v1`. Do not configure it to localhost or a different Cloud Run origin in production. Local visitor generation needs no token; if testing admin publishing, enter a locally generated value in your ignored backend `.env` and type it into the admin panel, never into frontend variables.
 
 ## Tests, build, and Docker
 
@@ -298,7 +298,7 @@ docker run --rm -p 8080:8080 doppel-api:local
 In another terminal:
 
 ```bash
-curl --fail http://localhost:8080/doppel/api/health
+curl --fail http://localhost:8080/doppel/api/v1/health
 ```
 
 The image uses `python:3.12-slim`, a non-root user, PORT-aware startup, and exactly one worker. It copies only backend application directories, not `.env` files or credentials.
@@ -324,7 +324,7 @@ Provisioning and the first deployment were explicitly approved. The service-leve
 
 This follows the portfolio pattern with a separate project:
 
-- Firebase Hosting serves `frontend/dist`. Its `/doppel/api/**` rewrite precedes the SPA fallback and points to `doppel-api` in `asia-south1`.
+- Firebase Hosting serves `frontend/dist`. Its `/doppel/api/**` rewrite (covering `/doppel/api/v1`) precedes the SPA fallback and points to `doppel-api` in `asia-south1`.
 - Cloud Run uses port 8080, 1 CPU, 512 MiB memory, concurrency 20, min-instances 0, both service-level and revision-level maximums of 1, one Python worker, and a 60-second request timeout.
 - Artifact Registry repository `doppel` stores SHA-tagged images.
 - Secret Manager supplies `ADMIN_TOKEN` from `doppel-admin-token:latest`; only the runtime service account receives access to this secret.
@@ -342,7 +342,7 @@ The minimal monitoring setup was created in `doppel-101126` after explicit appro
 
 | Resource | Configuration |
 | --- | --- |
-| `doppel API health` uptime check | HTTPS `doppel-app.web.app/doppel/api/health`, every 5 minutes from Asia Pacific, Europe, and Iowa; 30-second timeout; certificate validation, HTTP 200, and JSON `status` equal to `ok` required |
+| `doppel API health` uptime check | HTTPS `doppel-app.web.app/doppel/api/v1/health`, every 5 minutes from Asia Pacific, Europe, and Iowa; 30-second timeout; certificate validation, HTTP 200, and JSON `status` equal to `ok` required |
 | `doppel API health failure` alert | At least two regions report failure for 10 minutes; enabled email notifications on incident opening and closing |
 | `doppel health alerts` channel | Enabled email delivery to `arunangshu01@gmail.com`; Google reports no pending verification requirement |
 | `doppel operations` dashboard | Health probe pass fraction, Cloud Run request rate by response class, per-revision p95 latency, and instance count; existing Google Cloud metrics only |
@@ -556,10 +556,10 @@ From the authenticated terminal:
 gh run list --repo "$GITHUB_REPO" --workflow deploy.yml --limit 5
 API_ORIGIN=$(gcloud run services describe doppel-api --project="$PROJECT_ID" \
   --region="$REGION" --format='value(status.url)')
-curl --fail "$API_ORIGIN/doppel/api/health"
+curl --fail "$API_ORIGIN/doppel/api/v1/health"
 curl --fail "https://${SITE_ID}.web.app/"
-curl --fail "https://${SITE_ID}.web.app/doppel/api/health"
-curl --fail "https://${SITE_ID}.web.app/doppel/api/openapi.json"
+curl --fail "https://${SITE_ID}.web.app/doppel/api/v1/health"
+curl --fail "https://${SITE_ID}.web.app/doppel/api/v1/openapi.json"
 ```
 
 In a browser, inspect the public demo, create two distinct visitor playgrounds, verify neither replaces the demo or the other, open visitor docs, download a schema, and verify theme persistence. Test admin publishing only when ready to intentionally replace the shared demo; enter its token in the UI, not curl/history/chat. Automated smoke tests do not publish a schema or verify all browser interactions.

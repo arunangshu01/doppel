@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-API_PREFIX = "/doppel/api"
+API_PREFIX = "/doppel/api/v1"
+LEGACY_API_PREFIX = "/doppel/api"
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
 HOST = os.getenv("HOST", "127.0.0.1")

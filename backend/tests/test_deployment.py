@@ -73,6 +73,20 @@ def test_ci_gate_and_keyless_deployment():
             subprocess.run(["bash", "-n"], input=step["run"], text=True, check=True, capture_output=True)
 
 
+def test_versioned_api_prefix_is_consistent_across_stack():
+    from utility.settings import API_PREFIX
+    assert API_PREFIX == "/doppel/api/v1"
+    deploy = load_yaml(".github/workflows/deploy.yml")["jobs"]["deploy"]["steps"]
+    build = next(step for step in deploy if step.get("name") == "Verify and build frontend")
+    assert build["env"]["VITE_API_URL"] == API_PREFIX
+    smoke = "\n".join(step.get("run", "") for step in deploy if "health" in step.get("run", ""))
+    assert re.findall(r"/doppel/api[^\"'\s]*/health", smoke) == [f"{API_PREFIX}/health"] * 2
+    assert f'{{"url":"{API_PREFIX}"}}' in smoke
+    for path in ["frontend/src/main.jsx", "frontend/src/App.jsx", "frontend/.env.example"]:
+        source = (ROOT / path).read_text()
+        assert API_PREFIX in source and not re.search(r"/doppel/api(?!/v1)['\"\n]", source)
+
+
 def test_hosting_rewrite_and_nonsecret_environment():
     hosting = json.loads((ROOT / "firebase.json").read_text())["hosting"]
     assert hosting["public"] == "frontend/dist"

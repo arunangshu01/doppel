@@ -10,7 +10,31 @@ from collections import OrderedDict, deque
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 
-from utility.settings import API_PREFIX
+from utility.settings import API_PREFIX, LEGACY_API_PREFIX
+
+
+class LegacyAPIPrefix:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get('path', '')
+        versioned = path == API_PREFIX or path.startswith(API_PREFIX + '/')
+        if scope['type'] != 'http' or versioned or not (path == LEGACY_API_PREFIX or path.startswith(LEGACY_API_PREFIX + '/')):
+            await self.app(scope, receive, send)
+            return
+        rewritten = API_PREFIX + path[len(LEGACY_API_PREFIX):]
+        raw_path = scope.get('raw_path')
+        if raw_path is not None:
+            raw_path = API_PREFIX.encode() + raw_path[len(LEGACY_API_PREFIX):]
+
+        async def deprecated_send(message):
+            if message['type'] == 'http.response.start':
+                message = {**message, 'headers': [*message.get('headers', []), (b'deprecation', b'true'),
+                                                  (b'link', f'<{rewritten}>; rel="successor-version"'.encode())]}
+            await send(message)
+
+        await self.app({**scope, 'path': rewritten, 'raw_path': raw_path}, receive, deprecated_send)
 
 
 class AbuseLimits:
