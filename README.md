@@ -4,7 +4,7 @@
 
 **Your backend stand-in.**
 
-**Live app:** https://doppel-app.web.app
+**Live app:** https://doppel-app.web.app (playground: https://doppel-app.web.app/playground)
 
 A schema-driven mock REST API generator with realistic seeded data, resource relationships, and an interactive playground. Built with FastAPI, React, and Faker.
 
@@ -77,7 +77,16 @@ npm ci
 npm run dev
 ```
 
-Open <http://localhost:5173>. The local API is at <http://127.0.0.1:8000/doppel/api/v1>, with docs at <http://127.0.0.1:8000/doppel/api/v1/docs> and OpenAPI at <http://127.0.0.1:8000/doppel/api/v1/openapi.json>. These replace the original unprefixed endpoints. Vite proxies `/doppel/api` (including `/doppel/api/v1`) to the local backend, matching the production same-origin architecture.
+Open <http://localhost:5173> for the landing page, or <http://localhost:5173/playground> for the workbench. The local API is at <http://127.0.0.1:8000/doppel/api/v1>, with docs at <http://127.0.0.1:8000/doppel/api/v1/docs> and OpenAPI at <http://127.0.0.1:8000/doppel/api/v1/openapi.json>. These replace the original unprefixed endpoints. Vite proxies `/doppel/api` (including `/doppel/api/v1`) to the local backend, matching the production same-origin architecture.
+
+### Pages
+
+| Path | Page |
+| --- | --- |
+| `/` | Landing page: product overview, features, how it works, starter templates, audiences, and links into the playground and API docs. It makes no API calls. |
+| `/playground` | The workbench described below. Any other path falls back to the landing page. |
+
+While the JavaScript bundle downloads, `index.html` shows a static logo screen. When the workbench starts, a boot splash appears if the API has not answered within 300 ms (Cloud Run scales to zero, so the first request after idling can take a few seconds). It explains the cold start as the wait grows, keeps the workbench inert behind it, and disappears as soon as the public demo loads or an error is shown. Both pages share the theme preference and creator attribution.
 
 ### Playground workflow
 
@@ -282,7 +291,7 @@ npm run test:browser
 npm audit --omit=dev --audit-level=low
 ```
 
-Backend tests cover deterministic types, references, schema validation, REST queries, session isolation/expiry/capacity, upload limits/deadlines, fair-use limits, identifier tampering, bounded limiter state, generation admission, admin authorization, no-cache headers, CORS, prefixed docs, and CI/deployment configuration. Jest/RTL tests mock HTTP and cover workbench behavior, signed-identifier forwarding, retry feedback, and structural accessibility. JSDOM cannot measure CSS contrast, so that rule is checked in real Chrome instead.
+Backend tests cover deterministic types, references, schema validation, REST queries, session isolation/expiry/capacity, upload limits/deadlines, fair-use limits, identifier tampering, bounded limiter state, generation admission, admin authorization, no-cache headers, CORS, prefixed docs, and CI/deployment configuration. Jest/RTL tests mock HTTP and cover workbench behavior, signed-identifier forwarding, retry feedback, the landing page, path routing, the boot splash, and structural accessibility. The Chrome check also covers the boot splash with a delayed API response and the landing page across all viewports and themes. JSDOM cannot measure CSS contrast, so that rule is checked in real Chrome instead.
 
 `test:browser` serves the production build on an isolated local port, starts a fresh temporary Chrome profile, and uses mocked API fixtures with long names/wide rows. It checks both themes across phone, tablet, desktop, landscape, and zoom-equivalent layouts; automated axe accessibility checks including color contrast; touch-target sizes; internal table/JSON scrolling; and keyboard skip navigation. It makes no production API calls. Chrome must be installed (`CHROME_BIN` can override its executable); Node.js 22 or newer is required. CI runs this check inside the existing required frontend job. Physical iOS/Android keyboards, pickers, clipboard behavior, notches, and touch gestures still need manual checks.
 
@@ -584,7 +593,7 @@ backend/
   tests/        pytest regression suite
 frontend/
   public/       SVG logo and favicon
-  src/          React workbench, themes, previews, and Jest/RTL tests
+  src/          React landing page, workbench, boot splash, themes, previews, and Jest/RTL tests
 deploy/
   cloud-run.env.yaml   Non-secret runtime environment
 firebase.json          Hosting, caching, and Cloud Run rewrite

@@ -378,6 +378,24 @@ test('reports a connection failure', async () => {
   global.fetch.mockRejectedValue(new Error('Backend unavailable'));
   render(<App />);
   expect(await screen.findByRole('alert')).toHaveTextContent('Backend unavailable');
+  expect(screen.queryByText(/Connecting to the doppel API/)).not.toBeInTheDocument();
+  expect(document.querySelector('.app-shell').inert).toBe(false);
+});
+
+test('shows a boot splash while the API wakes up and hands off to the workbench', async () => {
+  let release;
+  global.fetch.mockImplementation((url) => url === '/doppel/api/v1/demo'
+    ? new Promise((resolve) => { release = () => resolve({ ok: true, json: async () => demo }); })
+    : response({ data: [{ id: '123', name: 'Ada Lovelace' }], total: 2 }));
+  render(<App />);
+  expect(screen.queryByText(/Connecting to the doppel API/)).not.toBeInTheDocument();
+  expect(await screen.findByText(/Connecting to the doppel API/)).toBeInTheDocument();
+  expect(document.querySelector('.app-shell').inert).toBe(true);
+  expect(document.title).toBe('doppel - Mock API playground');
+  await act(async () => release());
+  await screen.findByText('Ada Lovelace');
+  expect(screen.queryByText(/Connecting to the doppel API/)).not.toBeInTheDocument();
+  expect(document.querySelector('.app-shell').inert).toBe(false);
 });
 
 test('changes the draft data locale without regenerating the live API', async () => {
