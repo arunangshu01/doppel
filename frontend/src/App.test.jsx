@@ -87,6 +87,12 @@ test('shows approved creator attribution and clickable public contact links', as
   expect(screen.getByRole('link', { name: 'Email Arunangshu Pramanik' })).toHaveAttribute('href', 'mailto:arunangshu01@gmail.com');
   expect(screen.getByRole('link', { name: 'GitHub' }).querySelector('svg')).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Email Arunangshu Pramanik' }).querySelector('svg')).toBeInTheDocument();
+  const linkedin = screen.getByRole('link', { name: 'LinkedIn' });
+  expect(linkedin).toHaveAttribute('href', 'https://www.linkedin.com/in/arunangshu-pramanik-1896168b');
+  expect(linkedin).toHaveAttribute('target', '_blank');
+  expect(linkedin).toHaveAttribute('rel', 'noreferrer');
+  expect(linkedin.querySelector('svg')).toBeInTheDocument();
+  expect(Array.from(screen.getByRole('navigation', { name: 'Creator contact' }).querySelectorAll('a')).map(link => link.getAttribute('aria-label'))).toEqual(['GitHub', 'LinkedIn', 'Email Arunangshu Pramanik']);
   expect(document.querySelector('a[href^="tel:"]')).not.toBeInTheDocument();
   expect(screen.queryByText('arunangshu01@gmail.com')).not.toBeInTheDocument();
 });
