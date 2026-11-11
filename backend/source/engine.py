@@ -30,7 +30,7 @@ def generate(schema: SchemaInput) -> dict[str, list[dict]]:
                 return fake.random_int(int(low), int(high))
             if spec.type == 'money':
                 return fake.random_int(ceil(Decimal(str(low)) * 100), floor(Decimal(str(high)) * 100)) / 100
-            return fake.random.uniform(low, high)
+            return min(max(round(fake.random.uniform(low, high), 4), low), high)
         if spec.start is not None or spec.end is not None:
             low, high = spec.date_bounds()
             if spec.type == 'date':

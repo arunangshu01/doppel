@@ -211,7 +211,7 @@ def test_simulated_delay_releases_capacity_after_cancellation(client, monkeypatc
 
 
 def test_read_limits_ignore_forged_ip_headers(client):
-    client.app.state.abuse.client_limits['read'] = 1
+    client.app.state.abuse.client_limits['read'] = 2
     token = client.get(f'{P}/demo').headers['x-doppel-client']
     headers = {'X-Doppel-Client': token, 'X-Forwarded-For': '198.51.100.1'}
     assert client.get(f'{P}/stores', headers=headers).status_code == 200
@@ -262,9 +262,35 @@ def test_invalid_signature_does_not_create_a_fresh_budget(client):
     client.app.state.abuse.client_limits['read'] = 1
     token = client.get(f'{P}/demo').headers['x-doppel-client']
     tampered = token[:-1] + ('0' if token[-1] != '0' else '1')
-    response = client.get(f'{P}/stores', headers={'X-Doppel-Client': tampered})
+    assert client.get(f'{P}/stores', headers={'X-Doppel-Client': tampered}).status_code == 200
+    response = client.get(f'{P}/stores', headers={'X-Doppel-Client': 'not-a-signed-identifier'})
     assert response.status_code == 429
     assert 'x-doppel-client' not in response.headers
+
+
+def test_new_visitors_without_identifier_are_not_locked_out(client):
+    client.app.state.abuse.client_limits['read'] = 1
+    tokens = set()
+    for _ in range(5):
+        response = client.get(f'{P}/demo')
+        assert response.status_code == 200
+        tokens.add(response.headers['x-doppel-client'])
+    assert len(tokens) == 5
+    assert client.get(f'{P}/stores', headers={'X-Doppel-Client': tokens.pop()}).status_code == 429
+
+
+def test_expired_signed_identifier_receives_a_fresh_budget(client):
+    import hashlib
+    import hmac
+    import time
+    limits = client.app.state.abuse
+    limits.client_limits['read'] = 1
+    payload = f'{"a" * 24}.{int(time.time()) - 4000}'
+    expired = f'{payload}.{hmac.digest(limits.key, payload.encode(), hashlib.sha256).hex()}'
+    assert client.get(f'{P}/stores', headers={'X-Doppel-Client': 'tampered'}).status_code == 200
+    response = client.get(f'{P}/stores', headers={'X-Doppel-Client': expired})
+    assert response.status_code == 200
+    assert response.headers['x-doppel-client'] != expired
 
 
 def test_rate_limit_state_is_bounded_and_recovers(client):
