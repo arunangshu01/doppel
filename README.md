@@ -207,7 +207,7 @@ The server does not trust forwarded IP headers for rate limiting: Firebase Hosti
 
 ## REST API
 
-All API routes use the versioned prefix `/doppel/api/v1`; the earlier unversioned `/doppel/api/...` routes are deprecated but still served by an internal rewrite to `/doppel/api/v1/...` (same handlers, rate limits, and headers, plus `Deprecation: true` and a `Link: rel="successor-version"` header) so existing links, open browser tabs, and the uptime check keep working during the transition. The alias will be removed in a later release. Firebase forwards the whole `/doppel/api/**` namespace unchanged to Cloud Run, so future versions need no Hosting change.
+All API routes use the versioned prefix `/doppel/api/v1`; the earlier unversioned `/doppel/api/...` routes were removed after a deprecation period and now return 404. Firebase forwards the whole `/doppel/api/**` namespace unchanged to Cloud Run, so future versions need no Hosting change.
 
 | Endpoint | Behavior |
 | --- | --- |
