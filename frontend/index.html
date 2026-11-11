@@ -5,7 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="doppel turns JSON schemas into local mock REST APIs with realistic seeded data and resource relationships. Build and test with an interactive React playground." />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-    <style>html { background: #f5f6f7; color-scheme: light; } html[data-theme="dark"] { background: #101214; color-scheme: dark; }</style>
+    <style>
+      html { background: #f5f6f7; color-scheme: light; } html[data-theme="dark"] { background: #101214; color-scheme: dark; }
+      body { margin: 0; }
+      .boot-static { min-height: 100vh; min-height: 100svh; display: grid; place-content: center; justify-items: center; gap: 14px; font: 500 14px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #586675; }
+      html[data-theme="dark"] .boot-static { color: #9ba5b2; }
+      .boot-static img { border-radius: 16px; }
+      @media (prefers-reduced-motion: no-preference) { .boot-static img { animation: boot-static-pulse 1.4s ease-in-out infinite; } }
+      @keyframes boot-static-pulse { 50% { transform: scale(.92); opacity: .7; } }
+    </style>
     <script>
       try {
         const saved = localStorage.getItem('doppel-theme');
@@ -17,7 +25,7 @@
     <title>doppel - Mock API playground</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="boot-static" role="status"><img src="/logo.svg" width="56" height="56" alt="" /><span>Loading doppel...</span></div></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

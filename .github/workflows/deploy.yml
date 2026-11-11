@@ -137,6 +137,7 @@ jobs:
           SITE=$(node -p "require('./firebase.json').hosting.site")
           ORIGIN="https://${SITE}.web.app"
           curl --fail --silent --show-error --retry 5 --retry-all-errors --max-time 60 "$ORIGIN/" > /dev/null
+          curl --fail --silent --show-error --retry 5 --retry-all-errors --max-time 60 "$ORIGIN/playground" > /dev/null
           curl --fail --silent --show-error --retry 5 --retry-all-errors --max-time 60 "$ORIGIN/doppel/api/v1/health" | python -c 'import json,sys; assert json.load(sys.stdin)=={"status":"ok"}'
           curl --fail --silent --show-error --retry 5 --retry-all-errors --max-time 60 "$ORIGIN/doppel/api/v1/openapi.json" | python -c 'import json,sys; s=json.load(sys.stdin); assert "paths" in s and {"url":"/doppel/api/v1"} in s.get("servers",[])'
           curl --fail --silent --show-error --retry 5 --retry-all-errors --max-time 60 "$ORIGIN/doppel/api/v1/docs" > /dev/null
