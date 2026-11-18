@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 30
     environment:
       name: production
-      url: https://doppel-app.web.app
+      url: https://doppel.arunangshupramanik.com
     permissions:
       contents: read
       id-token: write
