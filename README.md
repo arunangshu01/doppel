@@ -4,7 +4,7 @@
 
 **Your backend stand-in.**
 
-**Live app:** https://doppel-app.web.app (playground: https://doppel-app.web.app/playground)
+**Live app:** https://doppel.arunangshupramanik.com (playground: https://doppel.arunangshupramanik.com/playground)
 
 A schema-driven mock REST API generator with realistic seeded data, resource relationships, and an interactive playground. Built with FastAPI, React, and Faker.
 
@@ -314,7 +314,7 @@ The image uses `python:3.12-slim`, a non-root user, PORT-aware startup, and exac
 
 ## GCP deployment architecture
 
-**Live deployment:** [doppel playground](https://doppel-app.web.app), first deployed through [GitHub Actions](https://github.com/arunangshu01/doppel/actions/runs/42836375202) after main CI passed. Live smoke checks verified Hosting, same-origin API health, retail data, no-store responses, and prefixed OpenAPI/docs. Browser interaction checks remain manual.
+**Live deployment:** [doppel playground](https://doppel.arunangshupramanik.com), first deployed through [GitHub Actions](https://github.com/arunangshu01/doppel/actions/runs/42836375202) after main CI passed. Live smoke checks verified Hosting, same-origin API health, retail data, no-store responses, and prefixed OpenAPI/docs. Browser interaction checks remain manual.
 
 | Setting | Configured value |
 | --- | --- |
